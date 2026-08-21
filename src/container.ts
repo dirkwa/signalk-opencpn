@@ -44,6 +44,14 @@ export function buildContainerConfig(
   tag: string,
   hostDataPath: string
 ): ContainerConfig {
+  // An empty path would silently produce `volumes: { '/home/ubuntu/.opencpn': '' }`,
+  // so OpenCPN would run with no persistent config and lose routes and waypoints
+  // on every recreate. Reachable via POST /api/update/apply, which calls
+  // buildConfig and can arrive before start() has resolved the mount.
+  if (!hostDataPath) {
+    throw new Error('OpenCPN data path is not resolved yet — the plugin is still starting')
+  }
+
   const config: ContainerConfig = {
     image: IMAGE,
     tag,
