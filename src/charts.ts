@@ -54,6 +54,9 @@ export async function findChartsPath(app: ChartsApp): Promise<string | null> {
     return null
   }
 
+  // `JSON.parse('null')` succeeds and yields null, which would throw on the
+  // property access below.
+  if (typeof parsed !== 'object' || parsed === null) return null
   const record = parsed as { enabled?: unknown; configuration?: { chartPath?: unknown } }
   // A disabled provider is not serving charts; sharing its directory anyway
   // would be surprising.

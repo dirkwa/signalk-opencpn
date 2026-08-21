@@ -116,12 +116,12 @@ describe('ensureDeviceToken', () => {
     expect(r).toEqual({ kind: 'pending', requestId: 'req-1' })
   })
 
-  it('reports a denied request rather than retrying forever', async () => {
+  it('reports a denied request distinctly, so the dead id can be dropped', async () => {
     const queryRequest = vi.fn((): Promise<unknown> =>
       Promise.resolve({ state: 'COMPLETED', accessRequest: { permission: 'DENIED' } })
     )
     const r = await ensureDeviceToken(strategy(), undefined, 'req-1', queryRequest)
-    expect(r).toMatchObject({ kind: 'failed' })
+    expect(r).toEqual({ kind: 'denied' })
   })
 
   // Requests are in-memory, so a restart loses them and queryRequest throws.

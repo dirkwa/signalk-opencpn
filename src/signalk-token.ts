@@ -74,6 +74,8 @@ export type ProvisionOutcome =
    * a deliberate act — asking again here would nag forever.
    */
   | { kind: 'revoked' }
+  /** An operator refused the request; the id is dead and must be dropped. */
+  | { kind: 'denied' }
   /** Provisioning was attempted and failed, or the API is unavailable. */
   | { kind: 'failed'; reason: string }
 
@@ -196,9 +198,7 @@ async function collectApproved(
 
   const token = reply.accessRequest?.token
   if (token) return { kind: 'provisioned', token }
-  if (reply.accessRequest?.permission === 'DENIED') {
-    return { kind: 'failed', reason: 'access request was denied' }
-  }
+  if (reply.accessRequest?.permission === 'DENIED') return { kind: 'denied' }
   // Still pending: keep waiting on the same request rather than filing another.
   if (reply.state === 'PENDING') return { kind: 'pending', requestId }
   return null

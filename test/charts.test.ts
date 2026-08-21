@@ -68,6 +68,15 @@ describe('findChartsPath', () => {
     expect(await findChartsPath(app())).toBeNull()
   })
 
+  it('survives a config file holding a non-object value', async () => {
+    // JSON.parse('null') succeeds, so this reaches the property access.
+    await fs.writeFile(
+      path.join(configPath, 'plugin-config-data', `${CHARTS_PROVIDER_ID}.json`),
+      'null'
+    )
+    expect(await findChartsPath(app())).toBeNull()
+  })
+
   it('survives a corrupt config file', async () => {
     await fs.writeFile(
       path.join(configPath, 'plugin-config-data', `${CHARTS_PROVIDER_ID}.json`),

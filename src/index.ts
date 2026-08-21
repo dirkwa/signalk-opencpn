@@ -24,7 +24,7 @@ import path from 'node:path'
 const PLUGIN_ID = 'signalk-opencpn'
 /** How often to check whether the access request has been approved. */
 const APPROVAL_POLL_MS = 5_000
-/** Give up watching after this long; a fresh request is filed on next start. */
+/** Stop watching after this long; the next start resumes the stored request. */
 const APPROVAL_WATCH_MS = 30 * 60_000
 
 export default function (app: OpenCpnApp): Plugin {
@@ -130,6 +130,16 @@ export default function (app: OpenCpnApp): Plugin {
         // the token, so once the server restarts an approved token can never
         // be recovered — the operator would have to approve a fresh request.
         if (outcome.requestId) watchForApproval(outcome.requestId, gen)
+        return
+      case 'denied':
+        // The stored id points at a refused request; keeping it would make
+        // every later start poll something that can never succeed.
+        delete settings.signalKRequestId
+        saveSettings()
+        app.error?.(
+          'The Signal K access request for OpenCPN was denied. Clear the stored ' +
+            'request in the plugin settings to ask again.'
+        )
         return
       case 'revoked':
         app.error?.(
