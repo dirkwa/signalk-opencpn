@@ -1,0 +1,39 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # @types/node major versions track the Node.js major. Pin to the
+      # lowest supported runtime (Node 22 per package.json engines) so
+      # types reflect what's actually available on every supported version.
+      # Allow updates within the v22.x line; ignore v23+.
+      - dependency-name: '@types/node'
+        versions: ['>=23']
+      # vite + @module-federation/vite are held back deliberately. The panel
+      # is a Module Federation remote loaded by the Signal K admin UI host,
+      # and that contract is invisible to unit tests: a bump can change the
+      # emitted share map or the jsx-runtime handling and break the panel at
+      # mount with no build error. Bump these by hand, then rebuild and check
+      # that `grep -ro jsx-runtime public/` is still empty and the panel
+      # mounts in a real admin UI.
+      - dependency-name: 'vite'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@module-federation/vite'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types:
+          - minor
+          - patch

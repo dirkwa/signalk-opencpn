@@ -47,13 +47,68 @@ deltas, no chart management.
 - `public/` is build **output** (`publicDir: false`, `emptyOutDir: false`);
   `build.js` writes index.html + icon there before vite adds remoteEntry.js.
 
+## Companion plugins (hard runtime dependencies)
+
+`signalk-container` is declared in `package.json` under `signalk.requires` and
+must be installed and enabled for this plugin to do anything. It is deliberately
+**not** an npm dependency — coupling is through the
+`globalThis.__signalk_containerManager` global it publishes, because Signal K
+hands each plugin only a shallow copy of `app`.
+
+Consequence for CI: the upstream plugin-ci integration harness cannot install
+companion plugins, so `enable-signalk-integration` is off for the automatic job.
+The failure it produces is structural, not a real defect.
+
+## File layout
+
+    src/index.ts              plugin entry: schema, start/stop, registerWithRouter
+    src/arch.ts               image tag from host architecture
+    src/gpu.ts                /dev/dri probe + owning-group resolution
+    src/container.ts          pure settings -> ContainerConfig
+    src/gui-url.ts            browser-facing URL from request headers
+    src/config/schema.ts      TypeBox schema + SCHEMA_DEFAULTS
+    src/configpanel/          federated React panel (admin UI remote)
+    build.js                  writes public/index.html + icon
+    test/                     vitest
+    plugin/                   tsc output (gitignored, shipped)
+    public/                   build output (gitignored, shipped)
+
 ## Build, lint, test
 
     npm run build:all      # lint + build + test
     npm test               # vitest
     npm run build          # tsc → plugin/, then build.js + vite → public/
 
-Sanity check after a build (both should hold):
+Sanity check after a build (both should hold, and CI enforces them in the
+`bundle-guards` job):
 
     grep -rl typebox public/          # must find nothing
     grep -ro jsx-runtime public/      # must find nothing
+
+## Local dev loop
+
+Real Docker on this VM is at `DOCKER_HOST=unix:///var/run/docker.sock` — the
+shell default points at podman.
+
+    npm run build
+    signalk-server -c ~/dev/tmp/opencpn-test    # throwaway config dir
+
+Enable `signalk-container` first, then this plugin.
+
+## Debugging recipes
+
+    curl -s localhost:3000/plugins/signalk-opencpn/api/status | jq
+    # .container.state, .ready, .gpu, .url
+
+    docker inspect signalk-opencpn --format \
+      '{{.HostConfig.NetworkMode}} {{.HostConfig.GroupAdd}} {{.HostConfig.Memory}}'
+
+    docker exec <container> id        # confirm the /dev/dri group is held
+
+## Conventions
+
+- Conventional commits (`feat:`, `fix:`, `chore:`, …), imperative, <= 72 chars.
+- **No AI attribution** anywhere — no `Co-Authored-By`, no mention of Claude.
+- Comments explain _why_, not _what_. Every non-obvious decision in this repo
+  carries a rationale block; keep that up.
+- No version bumps in feature/fix PRs.

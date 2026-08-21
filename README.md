@@ -72,5 +72,15 @@ boat network over a VPN (for example
 
 ## License
 
-Apache-2.0. OpenCPN and the `npgause/opencpn-kiosk` image are the work of their
-respective authors and are not affiliated with this plugin.
+Source-available, no redistribution — see [LICENSE.md](LICENSE.md). Free for
+personal use aboard your own vessel, for your company's internal operations, and
+for non-commercial education and research. You may redistribute verbatim official
+releases (so registries, mirrors and your own backups are fine), but not modified
+versions.
+
+OpenCPN and the `npgause/opencpn-kiosk` image are the work of their respective
+authors, are licensed separately, and are not affiliated with this plugin.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).

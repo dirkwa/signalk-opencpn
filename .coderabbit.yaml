@@ -1,0 +1,222 @@
+language: en-US
+
+reviews:
+  profile: assertive
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    ignore_title_keywords:
+      - 'chore(release):'
+      - 'chore(deps):'
+      - 'chore(deps-dev):'
+      - '[skip review]'
+      - 'WIP'
+    ignore_usernames:
+      - 'release-please[bot]'
+      - 'renovate[bot]'
+      - 'dependabot[bot]'
+      - 'github-actions[bot]'
+
+  path_filters:
+    - '!**/package-lock.json'
+    - '!**/yarn.lock'
+    - '!**/pnpm-lock.yaml'
+    - '!**/*.min.js'
+    - '!**/*.min.css'
+    - '!**/dist/**'
+    - '!**/plugin/**'
+    - '!**/public/**'
+    - '!**/node_modules/**'
+
+  high_level_summary_instructions: |
+    Write summaries in present tense. Describe what the code does, not what
+    it did. Skip filler like "This PR" — go straight to the change.
+
+  path_instructions:
+    - path: '**/*'
+      instructions: |
+        ## Scope
+
+        Focus on files changed since `main`. Think about how changes interact
+        with the rest of the codebase, not just the diff in isolation.
+
+        signalk-opencpn is a **shim**: a SignalK plugin that runs the
+        third-party `npgause/opencpn-kiosk` container and surfaces it as an
+        "OpenCPN" tile in SignalK's Webapps list. It owns the container
+        lifecycle and nothing else — no proxying, no SignalK deltas, no chart
+        management. OpenCPN talks to SignalK itself, over the network.
+
+        1. **Plugin (`src/`, Node, runs in the SignalK server process)**
+           - Asks `signalk-container` (via `signalk-container-helper`'s
+             `ManagedContainer`) to run the OpenCPN image.
+           - Exposes a thin HTTP surface at `/plugins/signalk-opencpn/api/*`:
+             a `/api/status` endpoint plus the helper's update routes.
+        2. **Config panel (`src/configpanel/`, Vite + React 19)**
+           - A Module Federation remote loaded by the SignalK admin UI.
+           - Read-only status plus update controls. The editable settings are
+             rendered by SignalK's own RJSF form from the TypeBox schema.
+        3. **Landing page (`build.js` → `public/index.html`)**
+           - What the Webapps tile opens. Resolves the target from
+             `/api/status` and forwards the browser to the container's port.
+
+        ## ESM / TypeScript strict / Node 22+ / Vite 8 + React 19
+
+        - `"type": "module"` — relative imports use the `.js` suffix
+          (node16 resolution). Do not suggest dropping it.
+        - tsconfig is strict plus `noUncheckedIndexedAccess`,
+          `noImplicitOverride`, `noImplicitReturns`. Avoid `any`. The panel
+          has its own `src/configpanel/tsconfig.json` for the JSX/DOM types.
+        - Node `>= 22`. Native fetch on the plugin side.
+
+        ## The no-proxy decision (do not suggest reversing it)
+
+        The OpenCPN UI is **Xpra HTML5**, a WebSocket-based remote display.
+        The Webapps tile opens `http://<host>:<port>` directly in a new tab;
+        the plugin is deliberately NOT in that data path.
+
+        - Do **not** suggest proxying the UI through the SignalK origin with
+          an Express/`node:http` forwarder. Hop-by-hop header stripping kills
+          the WebSocket upgrade, and the sibling plugins that do proxy
+          (signalk-backup, signalk-doctor) have no upgrade handling at all.
+        - The consequence is known and accepted: **the Xpra port carries no
+          SignalK authentication**, the same exposure as the upstream image's
+          own compose file. It is documented in the README's Security
+          section. Flagging it again as a new finding is noise.
+
+        ## Container config invariants (`src/container.ts`)
+
+        - `buildContainerConfig` must stay **pure and stable for stable
+          inputs**. signalk-container recreates the container whenever image,
+          tag, env, volumes, networkMode, devices or groupAdd differ from
+          what is running, so unstable output — a reordered array, a field
+          that flips between set and `undefined` — causes an endless
+          recreate loop. There is a test asserting byte-identical output
+          across calls; do not suggest weakening it.
+        - GPU detection therefore happens **once in `start()`** and is passed
+          in. Do not suggest probing the filesystem from inside
+          `buildContainerConfig`.
+        - `networkMode: 'host'` is required, not a preference: OpenCPN needs
+          multicast/mDNS to discover NMEA sources and the SignalK server.
+          `ports` are meaningless under host networking and are omitted on
+          purpose — do not suggest adding them.
+        - `IMAGE` and `CONTAINER_NAME` are module-level constants. Don't
+          extract them as config unless asked.
+
+        ## GPU detection (`src/gpu.ts`)
+
+        - The upstream compose example hardcodes `group_add: "993"`, which is
+          the render gid on the image author's host. **Never** suggest
+          hardcoding a gid. The code stats the real `/dev/dri` nodes and
+          resolves the owning group *names*, because the helper maps names
+          against the HOST's `/etc/group`.
+        - A machine with no GPU is a normal, supported configuration:
+          `detectGpu` must never throw, and OpenCPN falls back to CPU
+          rendering.
+        - The returned group list is sorted deliberately — see the drift
+          note above.
+
+        ## Image tag resolution (`src/arch.ts`)
+
+        - The image publishes **no multi-arch manifest and no `latest` tag**,
+          only `x86` (amd64) and `pi` (arm64). Do not suggest defaulting to
+          `latest` or letting the runtime pick — it cannot.
+        - `resolveTag` is synchronous because `ManagedContainer.resolveTag`
+          is. Do not suggest making it async.
+
+        ## Plugin lifecycle (`src/index.ts`)
+
+        - `start()` is **synchronous** — SignalK does not await it. The async
+          body runs under `startSafely` guarded by a generation counter and
+          an AbortController; every async continuation re-checks its
+          generation. Do not suggest making `start` async.
+        - `stop()` aborts **before** awaiting `container.stop()`, or
+          `readinessRetry` queues another attempt and resurrects the
+          container. Do not suggest reordering.
+        - SignalK does **not** seed schema defaults; a freshly enabled plugin
+          receives `{}`. The `{ ...SCHEMA_DEFAULTS, ...options }` merge is
+          required, not defensive coding.
+        - `resolveMount()` is used, **not** `signalkDataMount` — the latter
+          resolves to *signalk-container's* own data dir, not this plugin's.
+        - The update `onApplied` callback persists the **requested** tag
+          (e.g. `"auto"`), not the resolved one. Persisting the resolved tag
+          would silently stop tracking the architecture on the next update.
+
+        ## Config panel conventions
+
+        - `jsxRuntime: 'classic'` in `vite.config.ts` pairs with
+          `"jsx": "react"` in the panel tsconfig. The automatic runtime
+          imports `react/jsx-runtime`, which is not in the `shared` scope,
+          producing a second React instance whose dispatcher is null at
+          mount — a runtime failure with no build error. Do not suggest
+          switching to the automatic runtime.
+        - **TypeBox must never reach the browser bundle.** Import config
+          types into `src/configpanel/` as type-only. CI greps for this.
+        - `public/` is build **output** (`publicDir: false`,
+          `emptyOutDir: false`); `build.js` writes `index.html` and the icon
+          there before Vite adds `remoteEntry.js`. Do not suggest
+          "cleaning up" either setting.
+        - Reuse `signalk-container-helper/ui` (`useStatusPoll`, `StatusCard`,
+          `UpdateControls`, `panelStyles`) rather than hand-rolling
+          equivalents.
+        - **No new top-level dependencies** without justification. Every dep
+          is a maintenance liability for a plugin on a Pi.
+
+        ## Echo comments
+
+        Flag any comment that merely restates what the code already says.
+        Examples to flag:
+        - `// Build the container config` above `buildContainerConfig`
+        - `// HTTP GET /api/status` above `router.get('/api/status')`
+        Replace with comments explaining *why*, not *what*. Or delete.
+
+        ## Documentation drift risk
+
+        Flag any `.md` file that contains:
+        - Specific code snippets, function signatures, or config values
+          likely to fall out of sync as code evolves.
+        - Step-by-step build/development instructions that duplicate or
+          shadow the code itself.
+        - Implementation status, progress markers, "currently implemented
+          as X" wording. Build narratives belong in PR descriptions, not
+          in repo docs.
+
+        ## Leftover crumbs from intermediate commits
+
+        Flag references in the current diff to symbols, files, or
+        approaches that no longer exist on this branch — old function
+        names in comments, stale TODOs from a superseded approach, etc.
+
+        ## Unchecked items in test plans
+
+        If the PR description has a checklist with unchecked items, flag
+        it. Either the work isn't done, or the unchecked items should be
+        removed.
+
+        ## Commit / PR conventions
+
+        - Commit messages: conventional commits format
+          (`feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `test:`,
+          `build:`, `ci:`). Imperative mood, ≤72 char subject.
+        - PR title becomes the squash commit subject — must be a
+          meaningful one-liner.
+        - **No AI attribution** in commits, PR bodies, or code. Don't
+          mention Claude, AI, or add `Co-Authored-By` trailers.
+        - **No version bumps** in feature/fix PRs. Versions are bumped in
+          dedicated `chore(release):` PRs only when the user explicitly
+          asks.
+
+        ## What NOT to flag
+
+        These are intentional:
+        - `as const` literals in discriminated-union construction.
+        - The direct-port (non-proxied) UI access — see above.
+        - The absence of `ports` in the container config under host
+          networking.
+        - The `{ ...SCHEMA_DEFAULTS, ...options }` merge in `start()`.
+        - The synchronous `start()` + `startSafely` + generation-counter
+          pattern — it guards a real lifecycle race.
+        - `jsxRuntime: 'classic'` and the single `react` share entry.
+        - `publicDir: false` / `emptyOutDir: false` in the Vite config.
+        - Sorted/deduplicated output from `detectGpu` — drift-detection
+          stability, not cosmetics.
