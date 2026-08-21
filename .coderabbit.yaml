@@ -6,10 +6,16 @@ reviews:
     enabled: true
     auto_incremental_review: true
     drafts: false
+    # Version bumps and dependency updates carry no reviewable logic: a
+    # release PR is a one-line version change, and reviewing it only produces
+    # findings about pre-existing code that happens to sit near the diff.
+    # These match against the PR TITLE, so the title has to use the exact
+    # `chore(release):` prefix — see AGENTS.md.
     ignore_title_keywords:
       - 'chore(release):'
       - 'chore(deps):'
       - 'chore(deps-dev):'
+      - 'release:'
       - '[skip review]'
       - 'WIP'
     ignore_usernames:
