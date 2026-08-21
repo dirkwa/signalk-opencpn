@@ -60,6 +60,13 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # Trusted publishing (OIDC) needs npm >= 11.5.1, and the runner image's
+      # bundled npm lags the Node release. Pin it explicitly so a release never
+      # fails on the publish step — by then the GitHub Release already exists,
+      # and the tag would have to be deleted and re-cut to retry.
+      - name: Use an npm that supports trusted publishing
+        run: npm install -g npm@latest
+
       - run: npm install
 
       - name: Build
