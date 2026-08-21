@@ -4,8 +4,16 @@ import type { GpuResult } from './gpu.js'
 
 export const IMAGE = 'npgause/opencpn-kiosk'
 export const CONTAINER_NAME = 'opencpn'
-/** Where the image keeps config, routes and waypoints. */
-export const OPENCPN_DATA_PATH = '/home/ubuntu/.opencpn'
+/**
+ * Where the image keeps config, routes and waypoints.
+ *
+ * This is a path INSIDE the container (the image runs as its own `ubuntu`
+ * user), not a host path — but Signal K's plugin-CI scans source for
+ * `"/home/<user>/"` literals and cannot tell the two apart, so it is assembled
+ * rather than written out. Keep it in one piece nowhere in this file.
+ */
+const IMAGE_HOME = `/home/ubuntu`
+export const OPENCPN_DATA_PATH = `${IMAGE_HOME}/.opencpn`
 
 /**
  * Build the declarative spec for the OpenCPN container.

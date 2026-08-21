@@ -5,7 +5,8 @@ import type { GpuResult } from '../src/gpu.js'
 
 const NO_GPU: GpuResult = { available: false, groups: [] }
 const GPU: GpuResult = { available: true, groups: ['video', 'render'] }
-const HOST_DATA = '/home/dirk/.signalk/plugin-config-data/signalk-opencpn'
+// Not under /home/<user>/: Signal K's plugin-CI rejects such literals in source.
+const HOST_DATA = '/var/lib/signalk/plugin-config-data/signalk-opencpn'
 
 const cfg = (over: Partial<Config> = {}): Config => ({ ...SCHEMA_DEFAULTS, ...over })
 
