@@ -9,14 +9,17 @@ import {
 
 const TOKEN = 'issued.jwt.here'
 
+/**
+ * Mirrors how Signal K really behaves (src/tokensecurity.ts): requestAccess
+ * creates a PENDING request and resolves with statusCode 202. The token is
+ * delivered ONCE through the update callback, if and when a human approves it —
+ * it is never stored on the device record.
+ */
 function strategy(over: Partial<SecurityStrategyLike> = {}): SecurityStrategyLike {
   return {
     isDummy: () => false,
     getConfiguration: () => ({ devices: [] }),
-    requestAccess: vi.fn((): Promise<unknown> => Promise.resolve({})),
-    setAccessRequestStatus: (_c, _id, _status, _body, cb) => {
-      cb(null, { devices: [{ clientId: DEVICE_CLIENT_ID, accessToken: TOKEN }] })
-    },
+    requestAccess: vi.fn((): Promise<unknown> => Promise.resolve({ statusCode: 202 })),
     ...over
   }
 }
@@ -49,41 +52,83 @@ describe('deviceRegistered', () => {
 
 describe('ensureDeviceToken', () => {
   it('does nothing when security is off', async () => {
-    const r = await ensureDeviceToken({ isDummy: () => true }, undefined)
-    expect(r).toEqual({ kind: 'not-needed' })
+    expect(await ensureDeviceToken({ isDummy: () => true }, undefined)).toEqual({
+      kind: 'not-needed'
+    })
   })
 
-  it('issues a token on first run', async () => {
-    const r = await ensureDeviceToken(strategy(), undefined)
-    expect(r).toEqual({ kind: 'provisioned', token: TOKEN })
+  it('files a request and waits for a human when none exists yet', async () => {
+    expect(await ensureDeviceToken(strategy(), undefined)).toEqual({ kind: 'pending' })
+  })
+
+  it('returns the token when the request is approved during the call', async () => {
+    const s = strategy({
+      requestAccess: vi.fn((_c, _r, _ip, cb?: (reply: unknown) => void): Promise<unknown> => {
+        cb?.({ statusCode: 200, data: { permission: 'APPROVED', token: TOKEN } })
+        return Promise.resolve({ statusCode: 200 })
+      })
+    })
+    expect(await ensureDeviceToken(s, undefined)).toEqual({ kind: 'provisioned', token: TOKEN })
+  })
+
+  it('stays pending when a request for us is already queued (400)', async () => {
+    const s = strategy({
+      requestAccess: vi.fn((): Promise<unknown> => Promise.resolve({ statusCode: 400 }))
+    })
+    expect(await ensureDeviceToken(s, undefined)).toEqual({ kind: 'pending' })
   })
 
   it('reuses a stored token while the device is still registered', async () => {
     const s = strategy({ getConfiguration: () => ({ devices: [{ clientId: DEVICE_CLIENT_ID }] }) })
-    const r = await ensureDeviceToken(s, 'stored.jwt')
-    expect(r).toEqual({ kind: 'existing', token: 'stored.jwt' })
+    expect(await ensureDeviceToken(s, 'stored.jwt')).toEqual({
+      kind: 'existing',
+      token: 'stored.jwt'
+    })
   })
 
-  // The important one: a deleted device is a deliberate revocation, and Signal K
-  // resolves the principal from the live device list on every request, so the
-  // stored token is already dead. Minting a replacement would undo the operator's
-  // action on the next restart.
-  it('treats a deleted device as a revocation and does not re-provision', async () => {
-    const requestAccess = vi.fn((): Promise<unknown> => Promise.resolve({}))
+  // A deleted device is a deliberate revocation, and Signal K resolves the
+  // principal from the live device list on every request, so the stored token is
+  // already dead. Asking again would nag the operator forever.
+  it('treats a deleted device as a revocation and does not ask again', async () => {
+    const requestAccess = vi.fn((): Promise<unknown> => Promise.resolve({ statusCode: 202 }))
     const s = strategy({ getConfiguration: () => ({ devices: [] }), requestAccess })
-    const r = await ensureDeviceToken(s, 'stored.jwt')
-    expect(r).toEqual({ kind: 'revoked' })
+    expect(await ensureDeviceToken(s, 'stored.jwt')).toEqual({ kind: 'revoked' })
     expect(requestAccess).not.toHaveBeenCalled()
   })
 
-  it('reports failure when approval yields no token', async () => {
-    const s = strategy({
-      setAccessRequestStatus: (_c, _id, _s, _b, cb) => {
-        cb(null, { devices: [] })
-      }
-    })
-    const r = await ensureDeviceToken(s, undefined)
-    expect(r.kind).toBe('failed')
+  // Signal K delivers the token exactly once and never persists it: the device
+  // record has no token field and requests live in an in-memory map. Polling
+  // the filed request while the server still runs is the only way to collect it.
+  it('collects the token from a request approved after it was filed', async () => {
+    const queryRequest = vi.fn((): Promise<unknown> =>
+      Promise.resolve({
+        state: 'COMPLETED',
+        accessRequest: { permission: 'APPROVED', token: TOKEN }
+      })
+    )
+    const r = await ensureDeviceToken(strategy(), undefined, 'req-1', queryRequest)
+    expect(r).toEqual({ kind: 'provisioned', token: TOKEN })
+  })
+
+  it('keeps waiting on the same request while it is still pending', async () => {
+    const queryRequest = vi.fn((): Promise<unknown> => Promise.resolve({ state: 'PENDING' }))
+    const r = await ensureDeviceToken(strategy(), undefined, 'req-1', queryRequest)
+    expect(r).toEqual({ kind: 'pending', requestId: 'req-1' })
+  })
+
+  it('reports a denied request distinctly, so the dead id can be dropped', async () => {
+    const queryRequest = vi.fn((): Promise<unknown> =>
+      Promise.resolve({ state: 'COMPLETED', accessRequest: { permission: 'DENIED' } })
+    )
+    const r = await ensureDeviceToken(strategy(), undefined, 'req-1', queryRequest)
+    expect(r).toEqual({ kind: 'denied' })
+  })
+
+  // Requests are in-memory, so a restart loses them and queryRequest throws.
+  it('files a fresh request when the stored one no longer exists', async () => {
+    const queryRequest = vi.fn((): Promise<unknown> => Promise.reject(new Error('not found')))
+    const r = await ensureDeviceToken(strategy(), undefined, 'gone', queryRequest)
+    expect(r.kind).toBe('pending')
   })
 
   it('reports failure when the strategy has no access-request API', async () => {
@@ -91,21 +136,19 @@ describe('ensureDeviceToken', () => {
     expect(r.kind).toBe('failed')
   })
 
-  it('reports failure rather than throwing when approval errors', async () => {
+  it('reports a refusal rather than throwing', async () => {
     const s = strategy({
-      setAccessRequestStatus: (_c, _id, _st, _b, cb) => {
-        cb(new Error('nope'))
-      }
+      requestAccess: vi.fn((): Promise<unknown> => Promise.resolve({ statusCode: 403 }))
     })
     const r = await ensureDeviceToken(s, undefined)
-    expect(r).toMatchObject({ kind: 'failed', reason: 'nope' })
+    expect(r).toMatchObject({ kind: 'failed' })
   })
 
   it('asks for readwrite, since OpenCPN writes routes and waypoints back', async () => {
     const calls: unknown[][] = []
     const requestAccess = vi.fn((...args: unknown[]): Promise<unknown> => {
       calls.push(args)
-      return Promise.resolve({})
+      return Promise.resolve({ statusCode: 202 })
     })
     await ensureDeviceToken(strategy({ requestAccess }), undefined)
     const req = calls[0]?.[1] as { accessRequest?: { clientId?: string; permissions?: string } }

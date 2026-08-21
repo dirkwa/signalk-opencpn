@@ -76,11 +76,12 @@ describe('buildContainerConfig', () => {
     expect(() => buildContainerConfig(cfg(), NO_GPU, 'x86', '')).toThrow(/not resolved yet/)
   })
 
-  it('mounts the shared charts directory when one is given', () => {
+  // Regression: with { ifMissing: 'skip' } signalk-container stats the HOST
+  // path from inside its own container, where it can never exist, and silently
+  // dropped the mount with "host path missing". A bare string skips that check.
+  it('mounts the shared charts directory as a plain bind', () => {
     const c = buildContainerConfig(cfg(), NO_GPU, 'x86', HOST_DATA, '/var/charts')
-    // ifMissing 'skip': an unplugged USB or unmounted NFS share must not stop
-    // OpenCPN from starting, it just means those charts are absent.
-    expect(c.volumes?.['/charts']).toEqual({ source: '/var/charts', ifMissing: 'skip' })
+    expect(c.volumes?.['/charts']).toBe('/var/charts')
   })
 
   it('omits the charts mount when no directory is shared', () => {

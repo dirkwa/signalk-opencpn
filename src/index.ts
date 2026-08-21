@@ -22,6 +22,10 @@ import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 
 const PLUGIN_ID = 'signalk-opencpn'
+/** How often to check whether the access request has been approved. */
+const APPROVAL_POLL_MS = 5_000
+/** Stop watching after this long; the next start resumes the stored request. */
+const APPROVAL_WATCH_MS = 30 * 60_000
 
 export default function (app: OpenCpnApp): Plugin {
   let settings: Config = { ...SCHEMA_DEFAULTS }
@@ -101,12 +105,41 @@ export default function (app: OpenCpnApp): Plugin {
     if (gen !== generation) return
 
     const strategy = app.securityStrategy
-    const outcome = await ensureDeviceToken(strategy, settings.signalKToken)
+    const outcome = await ensureDeviceToken(
+      strategy,
+      settings.signalKToken,
+      settings.signalKRequestId,
+      app.queryRequest?.bind(app)
+    )
     // A retired lifecycle must not persist settings or touch opencpn.conf.
     if (gen !== generation) return
 
     switch (outcome.kind) {
       case 'not-needed':
+        return
+      case 'pending':
+        if (outcome.requestId && settings.signalKRequestId !== outcome.requestId) {
+          settings.signalKRequestId = outcome.requestId
+          saveSettings()
+        }
+        app.setPluginStatus('Waiting for OpenCPN to be approved under Security → Access Requests')
+        // Poll in the background until a human approves.
+        //
+        // This has to happen within THIS server lifetime: Signal K keeps
+        // requests in an in-memory map and the device record is stored without
+        // the token, so once the server restarts an approved token can never
+        // be recovered — the operator would have to approve a fresh request.
+        if (outcome.requestId) watchForApproval(outcome.requestId, gen)
+        return
+      case 'denied':
+        // The stored id points at a refused request; keeping it would make
+        // every later start poll something that can never succeed.
+        delete settings.signalKRequestId
+        saveSettings()
+        app.error?.(
+          'The Signal K access request for OpenCPN was denied. Restart the plugin ' +
+            'to ask again; OpenCPN runs without Signal K access in the meantime.'
+        )
         return
       case 'revoked':
         app.error?.(
@@ -118,9 +151,11 @@ export default function (app: OpenCpnApp): Plugin {
         app.error?.(`Could not get Signal K access for OpenCPN: ${outcome.reason}`)
         return
       case 'provisioned':
-        // Loud on purpose: a device was granted access without anyone approving it.
-        app.debug(`Registered OpenCPN as a Signal K device (permissions: readwrite)`)
+        app.debug('OpenCPN was approved as a Signal K device')
         settings.signalKToken = outcome.token
+        // The request has served its purpose; keeping the id would make a
+        // later start poll a request that no longer matters.
+        delete settings.signalKRequestId
         saveSettings()
         break
       case 'existing':
@@ -128,6 +163,46 @@ export default function (app: OpenCpnApp): Plugin {
     }
 
     await writeTokenToOpenCpn(outcome.token, gen)
+  }
+
+  /**
+   * Poll a filed access request until it is approved, then store the token and
+   * write it into OpenCPN.
+   *
+   * Signal K delivers a device token exactly once and never persists it, so
+   * the only reliable moment to collect it is while this server is still
+   * running and the request still exists.
+   */
+  function watchForApproval(requestId: string, gen: number): void {
+    const deadline = Date.now() + APPROVAL_WATCH_MS
+    const tick = async (): Promise<void> => {
+      if (gen !== generation) return
+      const outcome = await ensureDeviceToken(
+        app.securityStrategy,
+        undefined,
+        requestId,
+        app.queryRequest?.bind(app)
+      )
+      if (gen !== generation) return
+
+      if (outcome.kind === 'provisioned') {
+        settings.signalKToken = outcome.token
+        delete settings.signalKRequestId
+        saveSettings()
+        await writeTokenToOpenCpn(outcome.token, gen)
+        app.setPluginStatus('OpenCPN approved — restart it to use the new access')
+        return
+      }
+      if (Date.now() < deadline) {
+        approvalTimer = setTimeout(() => void tick(), APPROVAL_POLL_MS)
+        approvalTimer.unref()
+        return
+      }
+      // Say so rather than leaving "Waiting for approval" on screen forever.
+      app.setPluginStatus('No approval yet — restart the plugin to request Signal K access again')
+    }
+    approvalTimer = setTimeout(() => void tick(), APPROVAL_POLL_MS)
+    approvalTimer.unref()
   }
 
   /**
@@ -177,6 +252,7 @@ export default function (app: OpenCpnApp): Plugin {
   // a quick disable/enable can leave an older async chain still running.
   let generation = 0
   let startAbort: AbortController | null = null
+  let approvalTimer: ReturnType<typeof setTimeout> | null = null
 
   async function asyncStart(gen: number, signal: AbortSignal): Promise<void> {
     const { manager, runtime } = await waitForContainerManager({
@@ -209,7 +285,8 @@ export default function (app: OpenCpnApp): Plugin {
     dataPath = mount.source
 
     if (settings.shareCharts) {
-      const providerPath = findChartsPath(app)
+      const providerPath = await findChartsPath(app)
+      if (gen !== generation) return
       if (providerPath) {
         // The provider's path is as SIGNAL K sees it; when Signal K is itself
         // containerized the host daemon cannot resolve it, so it goes through
@@ -223,8 +300,10 @@ export default function (app: OpenCpnApp): Plugin {
           chartsPath = chartsMount.source
           app.debug(`Sharing charts from ${providerPath}`)
         } catch (err) {
-          // Charts are optional — a path we cannot reach must not stop OpenCPN.
-          app.debug(`Charts directory unavailable: ${errMsg(err)}`)
+          // Charts are optional — a path we cannot reach must not stop OpenCPN
+          // — but staying silent about WHY made a misconfiguration
+          // indistinguishable from "no charts plugin installed".
+          app.error?.(`Could not share charts from ${providerPath}: ${errMsg(err)}`)
           chartsPath = undefined
         }
       }
@@ -303,6 +382,10 @@ export default function (app: OpenCpnApp): Plugin {
       // container.
       startAbort?.abort()
       startAbort = null
+      if (approvalTimer) {
+        clearTimeout(approvalTimer)
+        approvalTimer = null
+      }
       await container.stop()
       app.setPluginStatus('Stopped')
     },
