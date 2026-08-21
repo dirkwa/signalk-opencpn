@@ -41,9 +41,9 @@ export const ConfigSchema = Type.Object({
   }),
   signalKToken: Type.Optional(
     Type.String({
-      readOnly: true,
       title: 'Signal K token',
-      description: 'Issued automatically. Written to OpenCPN on start.'
+      description:
+        'Issued automatically and written to OpenCPN on start. Clear this field to issue a new one — needed after revoking OpenCPN under Security → Devices, which is otherwise never undone automatically.'
     })
   ),
   shareCharts: Type.Boolean({

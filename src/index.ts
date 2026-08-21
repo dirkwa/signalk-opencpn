@@ -92,11 +92,13 @@ export default function (app: OpenCpnApp): Plugin {
    * been deleted from Signal K, that is a revocation, and quietly minting a
    * replacement would undo it.
    */
-  async function provisionToken(): Promise<void> {
+  async function provisionToken(gen: number): Promise<void> {
     if (!settings.provisionSignalKToken) return
 
     const strategy = app.securityStrategy
     const outcome = await ensureDeviceToken(strategy, settings.signalKToken)
+    // A retired lifecycle must not persist settings or touch opencpn.conf.
+    if (gen !== generation) return
 
     switch (outcome.kind) {
       case 'not-needed':
@@ -120,11 +122,11 @@ export default function (app: OpenCpnApp): Plugin {
         break
     }
 
-    await writeTokenToOpenCpn(outcome.token)
+    await writeTokenToOpenCpn(outcome.token, gen)
   }
 
   /** Put the token in opencpn.conf, if OpenCPN has written one yet. */
-  async function writeTokenToOpenCpn(token: string): Promise<void> {
+  async function writeTokenToOpenCpn(token: string, gen: number): Promise<void> {
     const confPath = path.join(app.getDataDirPath(), 'opencpn.conf')
     let conf: string
     try {
@@ -137,6 +139,7 @@ export default function (app: OpenCpnApp): Plugin {
     }
     const updated = setAuthTokenInConf(conf, token)
     if (updated === null) return
+    if (gen !== generation) return
     await fs.writeFile(confPath, updated, 'utf8')
     app.debug('Wrote the Signal K token into OpenCPN\u2019s connection settings')
   }
@@ -176,6 +179,10 @@ export default function (app: OpenCpnApp): Plugin {
     // the container, which we already know: OPENCPN_DATA_PATH.)
     dataPath = mount.source
 
+    // Cleared unconditionally: it is module-scoped, so a value left by a
+    // previous lifecycle would otherwise leak into this one after the setting
+    // is turned off or the provider is uninstalled.
+    chartsPath = undefined
     if (settings.shareCharts) {
       const providerPath = findChartsPath(app)
       if (providerPath) {
@@ -187,6 +194,7 @@ export default function (app: OpenCpnApp): Plugin {
             hostPath: providerPath,
             containerPath: CHARTS_MOUNT
           })
+          if (gen !== generation) return
           chartsPath = chartsMount.source
           app.debug(`Sharing charts from ${providerPath}`)
         } catch (err) {
@@ -198,7 +206,7 @@ export default function (app: OpenCpnApp): Plugin {
       if (gen !== generation) return
     }
 
-    await provisionToken()
+    await provisionToken(gen)
     if (gen !== generation) return
 
     gpu = await detectGpu()

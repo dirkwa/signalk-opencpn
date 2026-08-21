@@ -8,7 +8,6 @@
  */
 
 export const CHARTS_PROVIDER_ID = 'signalk-charts-provider-simple'
-/** Where the charts directory is mounted inside the container. */
 export const CHARTS_MOUNT = '/charts'
 
 /** The slice of Signal K's app object this module needs. */
@@ -43,5 +42,8 @@ export function findChartsPath(app: PluginOptionsReader): string | null {
   // Must be absolute: a relative path would resolve against whatever the
   // runtime's working directory happens to be.
   if (!trimmed.startsWith('/')) return null
+  // Refuse the host root. A misconfigured or empty-ish chartPath of "/" would
+  // otherwise bind the entire host filesystem into the container.
+  if (trimmed.replace(/\/+$/, '') === '') return null
   return trimmed
 }

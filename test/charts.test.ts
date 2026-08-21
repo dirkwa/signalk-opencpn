@@ -27,6 +27,11 @@ describe('findChartsPath', () => {
     expect(findChartsPath(reader({ configuration: {} }))).toBeNull()
   })
 
+  it('rejects the host root, which would bind the whole filesystem in', () => {
+    expect(findChartsPath(reader({ configuration: { chartPath: '/' } }))).toBeNull()
+    expect(findChartsPath(reader({ configuration: { chartPath: '///' } }))).toBeNull()
+  })
+
   it('rejects a relative path, which would resolve against an arbitrary cwd', () => {
     expect(findChartsPath(reader({ configuration: { chartPath: 'charts' } }))).toBeNull()
   })

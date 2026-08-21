@@ -6,10 +6,11 @@ import {
   setAuthTokenInDataConnections
 } from '../src/opencpn-conf.js'
 
-// Dirk's real connection line, taken verbatim from a live opencpn.conf: 24
-// fields, Signal K protocol (index 4 = '2'), empty AuthToken at index 23.
+// The exact layout OpenCPN writes — 24 fields, Signal K protocol (index 4 =
+// '2'), empty AuthToken at index 23 — with the host details replaced by the
+// RFC 5737 documentation address so no real installation is described here.
 const REAL_ROW =
-  '1;3;172.31.3.122;80;2;;4800;1;0;0;;0;;0;0;1;0;1;SignalK: vmsignalk (172.31.3.122 port 80);0;;0;0;'
+  '1;3;192.0.2.10;80;2;;4800;1;0;0;;0;;0;0;1;0;1;SignalK: vessel (192.0.2.10 port 80);0;;0;0;'
 
 const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.test.sig'
 
@@ -31,7 +32,7 @@ describe('setAuthTokenInDataConnections', () => {
 
   it('preserves the user comment, which sits next to the token', () => {
     const after = setAuthTokenInDataConnections(REAL_ROW, TOKEN)?.split(';') ?? []
-    expect(after[18]).toBe('SignalK: vmsignalk (172.31.3.122 port 80)')
+    expect(after[18]).toBe('SignalK: vessel (192.0.2.10 port 80)')
   })
 
   it('returns null when the token is already correct, so the file is not rewritten', () => {
