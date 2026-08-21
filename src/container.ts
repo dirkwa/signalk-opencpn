@@ -16,6 +16,19 @@ const IMAGE_HOME = `/home/ubuntu`
 export const OPENCPN_DATA_PATH = `${IMAGE_HOME}/.opencpn`
 
 /**
+ * The image declares `USER ubuntu` (uid/gid 1000), so signalk-container has to
+ * be told to map bind-mount ownership to it.
+ *
+ * Without this the config bind mount lands owned by a uid the container user
+ * cannot write to — on rootless podman the Signal K user maps to container
+ * uid 0, leaving `ubuntu` with a read-only directory. OpenCPN then starts,
+ * fails to persist its first-run configuration, and exits cleanly after a few
+ * seconds; `--exit-with-children` takes the whole container down with it, so
+ * the symptom is "runs for 8 seconds then stops" with nothing in the logs.
+ */
+const IMAGE_USER = { inImageUid: 1000, inImageGid: 1000 }
+
+/**
  * Build the declarative spec for the OpenCPN container.
  *
  * PURE, and stable for stable inputs. signalk-container recreates the
@@ -31,6 +44,16 @@ export function buildContainerConfig(
   tag: string,
   hostDataPath: string
 ): ContainerConfig {
+  // An empty path would silently mount nothing at OPENCPN_DATA_PATH, so
+  // OpenCPN would run with no persistent config and lose routes and waypoints
+  // on every recreate. Reachable via POST /api/update/apply, which calls
+  // buildConfig and can arrive before start() has resolved the mount.
+  // (Spelling the container path out here would trip Signal K's plugin-CI
+  // home-path validator — see OPENCPN_DATA_PATH above.)
+  if (!hostDataPath) {
+    throw new Error('OpenCPN data path is not resolved yet — the plugin is still starting')
+  }
+
   const config: ContainerConfig = {
     image: IMAGE,
     tag,
@@ -45,6 +68,7 @@ export function buildContainerConfig(
       XPRA_USE_GPU: String(gpu.available)
     },
     volumes: { [OPENCPN_DATA_PATH]: hostDataPath },
+    user: IMAGE_USER,
     restart: 'unless-stopped'
   }
 

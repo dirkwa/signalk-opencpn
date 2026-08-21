@@ -46,17 +46,35 @@ export default function (app: OpenCpnApp): Plugin {
   })
 
   /**
-   * Wait for Xpra to answer on loopback. Replaces ManagedContainer's readiness
-   * probe (see the note on the constructor above).
+   * Wait for Xpra to answer. Replaces ManagedContainer's readiness probe (see
+   * the note on the constructor above).
    *
-   * "Container running" is not "Xpra accepting connections": the image starts
-   * an Xvfb display and OpenCPN before it binds, so the port is refused for a
-   * few seconds after the container reports running.
+   * "Container running" is not "Xpra accepting connections": the image brings
+   * up an Xvfb display before it binds, so the port is refused for a few
+   * seconds after the container reports running.
+   *
+   * The OpenCPN container uses host networking, so it listens on the host's
+   * loopback. That is reachable from here when Signal K runs on the host, or
+   * in a container that also uses host networking — the deployments this
+   * plugin targets. A bridge-networked Signal K has its own loopback and
+   * cannot see it; readiness then times out and the retry loop reports it
+   * rather than the plugin claiming to be running when it is not.
    */
   async function waitForXpra(signal: AbortSignal): Promise<void> {
     await waitForHttpReady(`http://127.0.0.1:${String(settings.port)}/`, {
       maxMs: 60_000,
       signal
+    })
+  }
+
+  /**
+   * Persist settings, logging rather than swallowing a failure — a silent loss
+   * here means the resolved tag is recomputed on every restart, and after an
+   * update the requested tag reverts, so auto-tracking quietly stops.
+   */
+  function saveSettings(): void {
+    app.savePluginOptions(settings, (err?: unknown) => {
+      if (err) app.error?.(`Failed to save plugin options: ${errMsg(err)}`)
     })
   }
 
@@ -129,7 +147,7 @@ export default function (app: OpenCpnApp): Plugin {
 
     if (settings.resolvedImageTag !== tag) {
       settings.resolvedImageTag = tag
-      app.savePluginOptions(settings, () => {})
+      saveSettings()
     }
     app.setPluginStatus(`Running (${tag}) on port ${String(settings.port)}`)
   }
@@ -155,8 +173,9 @@ export default function (app: OpenCpnApp): Plugin {
 
     async stop() {
       generation += 1
-      // Abort BEFORE awaiting: readinessRetry would otherwise queue another
-      // attempt behind the stop and resurrect the container.
+      // Abort BEFORE awaiting: the retryForever loop in asyncStart would
+      // otherwise queue another attempt behind the stop and resurrect the
+      // container.
       startAbort?.abort()
       startAbort = null
       await container.stop()
@@ -182,7 +201,7 @@ export default function (app: OpenCpnApp): Plugin {
           // or the next update silently stops tracking the architecture.
           settings.imageTag = requestedTag
           settings.resolvedImageTag = resolvedTag
-          app.savePluginOptions(settings, () => {})
+          saveSettings()
         }
       })
     }

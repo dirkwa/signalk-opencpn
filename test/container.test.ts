@@ -63,6 +63,24 @@ describe('buildContainerConfig', () => {
     expect(c.groupAdd).not.toContain('993')
   })
 
+  // Regression: the image declares USER ubuntu (1000). Without this mapping the
+  // config bind mount is not writable by the container user — on rootless
+  // podman the Signal K user maps to container uid 0 — so OpenCPN cannot save
+  // its first-run config, exits after a few seconds, and --exit-with-children
+  // takes the container down. Symptom: "runs 8s then stops", clean exit 0.
+  // Reachable in practice: POST /api/update/apply calls buildConfig via
+  // ManagedContainer.applyUpdate, and registerWithRouter runs before start()
+  // has resolved the mount. Building anyway would mount an empty source, so
+  // OpenCPN would silently lose routes and waypoints on the recreate.
+  it('refuses to build a config before the data path is resolved', () => {
+    expect(() => buildContainerConfig(cfg(), NO_GPU, 'x86', '')).toThrow(/not resolved yet/)
+  })
+
+  it('maps bind-mount ownership to the image user', () => {
+    const c = buildContainerConfig(cfg(), NO_GPU, 'x86', HOST_DATA)
+    expect(c.user).toEqual({ inImageUid: 1000, inImageGid: 1000 })
+  })
+
   it('applies the memory limit, and omits it entirely when blank', () => {
     expect(buildContainerConfig(cfg(), NO_GPU, 'x86', HOST_DATA).resources).toEqual({
       memory: '2g'

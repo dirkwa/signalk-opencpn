@@ -10,6 +10,14 @@
  *
  * So instead of trusting a number, we stat the device nodes that are actually
  * there and ask the host which groups own them.
+ *
+ * ⚠️ This probes the filesystem of whatever process runs it. When Signal K is
+ * itself containerized — the common deployment — that is the Signal K
+ * container, which has no /dev/dri even though the HOST does. Detection then
+ * correctly reports "no GPU" for its own namespace while the machine that will
+ * actually run OpenCPN has one. There is no way to see the host's /dev/dri
+ * from inside, so the result is treated as a best-effort hint: a false
+ * negative costs hardware acceleration, never a failed start.
  */
 
 import { promises as fs } from 'node:fs'

@@ -8,14 +8,15 @@
   "scripts": {
     "build": "tsc && npm run typecheck:panel && node build.js && vite build",
     "typecheck:panel": "tsc -p src/configpanel --noEmit",
-    "build:all": "npm run lint && npm run build && npm run test",
+    "build:all": "npm run lint && npm run check:paths && npm run build && npm run test",
     "test": "vitest run",
     "lint": "eslint 'src/**/*.ts' 'src/**/*.tsx' 'test/**/*.ts'",
     "format": "prettier --write \"src/**/*.ts\" \"src/**/*.tsx\" \"test/**/*.ts\" && eslint --fix 'src/**/*.ts' 'src/**/*.tsx' 'test/**/*.ts' && npm run format:other",
     "format:other": "prettier --write \"**/*.md\" \"*.{json,yml,yaml,mjs,js}\" \".github/**/*.{yml,yaml}\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"src/**/*.tsx\" \"test/**/*.ts\" \"**/*.md\" \"*.{json,yml,yaml,mjs,js}\" \".github/**/*.{yml,yaml}\"",
     "prepublishOnly": "npm run build",
-    "release": "git tag -d v$npm_package_version; git tag v$npm_package_version && git push && git push origin v$npm_package_version"
+    "release": "npm run build:all && git tag -a v$npm_package_version -m v$npm_package_version && git push --atomic origin HEAD refs/tags/v$npm_package_version",
+    "check:paths": "node scripts/check-home-paths.mjs"
   },
   "keywords": [
     "signalk-node-server-plugin",
