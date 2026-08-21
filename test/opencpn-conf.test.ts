@@ -148,6 +148,21 @@ describe('addChartDirectory', () => {
     expect(out).toContain('ChartDir1=/data^abc123')
   })
 
+  // The section is often followed by a blank line; inserting at the section's
+  // end would strand the new entry after it, away from its siblings.
+  it('keeps entries contiguous when a blank line follows the section', () => {
+    const conf = '[ChartDirectories]\nChartDir1=/a^x\n\n[Next]\nK=1\n'
+    const out = addChartDirectory(conf, '/charts')?.split('\n') ?? []
+    expect(out[1]).toBe('ChartDir1=/a^x')
+    expect(out[2]).toBe('ChartDir2=/charts^')
+    expect(out[3]).toBe('')
+  })
+
+  it('handles a section that has no entries yet', () => {
+    const out = addChartDirectory('[ChartDirectories]\n\n[Next]\n', '/charts')?.split('\n') ?? []
+    expect(out[1]).toBe('ChartDir1=/charts^')
+  })
+
   it('creates the section when the file has none yet', () => {
     const out = addChartDirectory('[Settings]\nA=1\n', '/charts') ?? ''
     expect(out).toContain('[ChartDirectories]')

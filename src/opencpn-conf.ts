@@ -149,17 +149,20 @@ export function addChartDirectory(conf: string, dir: string): string | null {
     return `${conf.replace(/\n*$/, '')}\n${CHART_DIRS_SECTION}\n${CHART_DIR_PREFIX}1=${dir}^\n`
   }
 
-  // Walk the section to its end, collecting existing entries.
-  let end = sectionAt + 1
+  // Walk the section, counting entries and remembering where the last one is.
+  // Inserting straight after it — rather than at the section's end — keeps the
+  // entries contiguous when the section is followed by blank lines.
   let count = 0
-  for (; end < lines.length; end++) {
-    const line = lines[end] ?? ''
+  let insertAt = sectionAt + 1
+  for (let i = sectionAt + 1; i < lines.length; i++) {
+    const line = lines[i] ?? ''
     if (line.startsWith('[')) break
     if (!isChartDirLine(line)) continue
     if (listed(line) === dir) return null
     count++
+    insertAt = i + 1
   }
 
   const entry = `${CHART_DIR_PREFIX}${String(count + 1)}=${dir}^`
-  return [...lines.slice(0, end), entry, ...lines.slice(end)].join('\n')
+  return [...lines.slice(0, insertAt), entry, ...lines.slice(insertAt)].join('\n')
 }
