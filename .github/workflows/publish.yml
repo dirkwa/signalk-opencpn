@@ -1,0 +1,50 @@
+name: Publish
+
+on:
+  push:
+    tags: ['v[0-9]*.[0-9]*.[0-9]*']
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate tag is strict semver
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc)\.[0-9]+)?$' \
+            || { echo "Not a valid release tag: $TAG"; exit 1; }
+      - uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref, '-beta.') || contains(github.ref, '-rc.') }}
+
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      # Publish from a pristine tree so no local build output can leak in.
+      - run: git clean -xfd
+      - run: npm install
+      - run: npm run build
+      - run: npm test
+      - name: Publish to npm
+        run: |
+          if [[ "$GITHUB_REF" == *-beta.* || "$GITHUB_REF" == *-rc.* ]]; then
+            npm publish --provenance --access public --tag beta
+          else
+            npm publish --provenance --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

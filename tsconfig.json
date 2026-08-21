@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "lib": ["ES2022"],
+    "outDir": "plugin",
+    "rootDir": "src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/configpanel/**", "node_modules", "plugin", "public"]
+}
