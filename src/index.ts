@@ -108,6 +108,9 @@ export default function (app: OpenCpnApp): Plugin {
     switch (outcome.kind) {
       case 'not-needed':
         return
+      case 'pending':
+        app.setPluginStatus('Waiting for OpenCPN to be approved under Security → Access Requests')
+        return
       case 'revoked':
         app.error?.(
           'Signal K access for OpenCPN was revoked — not re-creating it. ' +
@@ -209,7 +212,8 @@ export default function (app: OpenCpnApp): Plugin {
     dataPath = mount.source
 
     if (settings.shareCharts) {
-      const providerPath = findChartsPath(app)
+      const providerPath = await findChartsPath(app)
+      if (gen !== generation) return
       if (providerPath) {
         // The provider's path is as SIGNAL K sees it; when Signal K is itself
         // containerized the host daemon cannot resolve it, so it goes through
@@ -223,8 +227,10 @@ export default function (app: OpenCpnApp): Plugin {
           chartsPath = chartsMount.source
           app.debug(`Sharing charts from ${providerPath}`)
         } catch (err) {
-          // Charts are optional — a path we cannot reach must not stop OpenCPN.
-          app.debug(`Charts directory unavailable: ${errMsg(err)}`)
+          // Charts are optional — a path we cannot reach must not stop OpenCPN
+          // — but staying silent about WHY made a misconfiguration
+          // indistinguishable from "no charts plugin installed".
+          app.error?.(`Could not share charts from ${providerPath}: ${errMsg(err)}`)
           chartsPath = undefined
         }
       }

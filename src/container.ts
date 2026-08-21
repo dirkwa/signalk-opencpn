@@ -70,9 +70,12 @@ export function buildContainerConfig(
     // can write into a directory the charts provider owns. Switch this to
     // read-only once VolumeSpec grows a `readOnly` option.
     //
-    // 'skip' rather than 'create': if the directory has gone (unplugged USB,
-    // unmounted NFS) OpenCPN should still start, just without those charts.
-    volumes[CHARTS_MOUNT] = { source: hostChartsPath, ifMissing: 'skip' }
+    // Plain string, NOT { ifMissing: 'skip' }. The skip policy stats the HOST
+    // path from inside signalk-container's own container, where a host path
+    // like /home/<user>/... can never exist, so the mount was silently dropped
+    // every time with "host path missing" — even though the directory is
+    // there. A bare source skips that check and binds it directly.
+    volumes[CHARTS_MOUNT] = hostChartsPath
   }
 
   const config: ContainerConfig = {

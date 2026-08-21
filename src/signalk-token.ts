@@ -37,13 +37,12 @@ export interface SecurityStrategyLike {
     sourceIp: string,
     updateCb?: (reply: unknown) => void
   ) => Promise<unknown>
-  setAccessRequestStatus?: (
-    config: unknown,
-    identifier: string,
-    status: string,
-    body: { permissions?: string; expiration?: string },
-    cb: (err: unknown, config?: unknown) => void
-  ) => void
+}
+
+/** Shape of the completion payload delivered to `requestAccess`'s updateCb. */
+interface AccessRequestUpdate {
+  statusCode?: number
+  data?: { permission?: string; token?: string }
 }
 
 export type ProvisionOutcome =
@@ -51,11 +50,13 @@ export type ProvisionOutcome =
   | { kind: 'not-needed' }
   /** A token we already hold is still backed by a registered device. */
   | { kind: 'existing'; token: string }
-  /** A fresh token was just issued. */
+  /** The device was approved and a token issued. */
   | { kind: 'provisioned'; token: string }
+  /** An access request is filed and waiting for a human to approve it. */
+  | { kind: 'pending' }
   /**
    * We hold a token but the device is gone: an operator revoked it. Treated as
-   * a deliberate act — re-provisioning here would silently undo it.
+   * a deliberate act — asking again here would nag forever.
    */
   | { kind: 'revoked' }
   /** Provisioning was attempted and failed, or the API is unavailable. */
@@ -97,16 +98,27 @@ export async function ensureDeviceToken(
       : { kind: 'revoked' }
   }
 
+  // The device may have been approved on a previous run, in which case a token
+  // is waiting in the completed request rather than in our settings.
   const requestAccess = strategy.requestAccess
-  const setStatus = strategy.setAccessRequestStatus
-  if (!requestAccess || !setStatus) {
+  if (!requestAccess) {
     return { kind: 'failed', reason: 'security strategy has no access-request API' }
   }
 
   try {
-    const config = strategy.getConfiguration?.()
-    await requestAccess(
-      config,
+    // The token arrives once, on this callback, if and when the request is
+    // approved — either immediately (already approved) or later, when a human
+    // clicks approve in Security → Access Requests. Deliberately NOT
+    // self-approved: granting a device access to the whole Signal K data model
+    // is an operator's decision.
+    let issued: string | undefined
+    const onUpdate = (reply: unknown): void => {
+      const update = reply as AccessRequestUpdate
+      if (update.data?.token) issued = update.data.token
+    }
+
+    const reply = (await requestAccess(
+      config(strategy),
       {
         accessRequest: {
           clientId: DEVICE_CLIENT_ID,
@@ -114,34 +126,28 @@ export async function ensureDeviceToken(
           permissions: DEVICE_PERMISSIONS
         }
       },
-      '127.0.0.1'
-    )
+      '127.0.0.1',
+      onUpdate
+    )) as AccessRequestUpdate | undefined
 
-    const token = await new Promise<string>((resolve, reject) => {
-      setStatus(
-        config,
-        DEVICE_CLIENT_ID,
-        'APPROVED',
-        { permissions: DEVICE_PERMISSIONS },
-        (err: unknown, updated: unknown) => {
-          if (err) {
-            reject(err instanceof Error ? err : new Error(errMsg(err)))
-            return
-          }
-          const devices = (updated as { devices?: { clientId?: string; accessToken?: string }[] })
-            .devices
-          const issued = devices?.find((d) => d.clientId === DEVICE_CLIENT_ID)?.accessToken
-          if (!issued) {
-            reject(new Error('approval returned no access token'))
-            return
-          }
-          resolve(issued)
-        }
-      )
-    })
+    if (issued) return { kind: 'provisioned', token: issued }
 
-    return { kind: 'provisioned', token }
+    const status = reply?.statusCode
+    // 202 = created and PENDING: normal, a human approves it next.
+    if (status === undefined || status === 202 || status === 200) {
+      return { kind: 'pending' }
+    }
+    // 400 usually means a request for this clientId is already pending.
+    if (status === 400) return { kind: 'pending' }
+    return {
+      kind: 'failed',
+      reason: `Signal K refused the access request (status ${String(status)})`
+    }
   } catch (err) {
     return { kind: 'failed', reason: errMsg(err) }
   }
+}
+
+function config(strategy: SecurityStrategyLike): unknown {
+  return strategy.getConfiguration?.()
 }

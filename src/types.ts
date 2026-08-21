@@ -19,10 +19,11 @@ export interface OpenCpnApp {
    */
   securityStrategy?: SecurityStrategyLike
   /**
-   * Reads another plugin's saved options — used to find where
-   * signalk-charts-provider-simple keeps its charts.
+   * Signal K's own configuration. `configPath` locates plugin-config-data,
+   * which is how another plugin's saved options are read — the app copy given
+   * to plugins has no getPluginOptions.
    */
-  getPluginOptions?: (id: string) => unknown
+  config?: { configPath?: string }
 }
 
 export interface Plugin {
