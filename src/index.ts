@@ -3,7 +3,9 @@ import {
   ManagedContainer,
   errMsg,
   resolveMount,
+  retryForever,
   startSafely,
+  waitForHttpReady,
   waitForContainerManager
 } from 'signalk-container-helper'
 import { resolveTag } from './arch.js'
@@ -34,27 +36,29 @@ export default function (app: OpenCpnApp): Plugin {
     buildConfig: (tag) => buildContainerConfig(settings, gpu, tag, dataPath ?? ''),
     defaultTag: SCHEMA_DEFAULTS.imageTag,
     resolveTag: (requested) => resolveTag(requested),
-    readiness: {
-      // "Container running" is not "Xpra accepting connections" — the HTML5
-      // client is served from the root path once it is genuinely up.
-      get port() {
-        return settings.port
-      },
-      path: '/',
-      maxMs: 60_000
-    },
-    readinessRetry: {
-      minDelayMs: 15_000,
-      maxDelayMs: 120_000,
-      onAttemptFailed: (err, nextDelayMs) => {
-        app.setPluginError(
-          `OpenCPN failed to start: ${errMsg(err)} — retrying in ${String(
-            Math.round(nextDelayMs / 1000)
-          )}s`
-        )
-      }
-    }
+    // No `readiness` here on purpose. ManagedContainer's readiness probe first
+    // calls resolveAddress(), which discovers the host address by inspecting
+    // published port bindings — and `networkMode: 'host'` never creates any, so
+    // it fails with "Declare the port in signalkAccessiblePorts". Under host
+    // networking the address is not a discovery problem at all: the container
+    // shares the host's stack, so it is reachable on loopback at the very port
+    // we configured. We probe that ourselves in waitForXpra() below.
   })
+
+  /**
+   * Wait for Xpra to answer on loopback. Replaces ManagedContainer's readiness
+   * probe (see the note on the constructor above).
+   *
+   * "Container running" is not "Xpra accepting connections": the image starts
+   * an Xvfb display and OpenCPN before it binds, so the port is refused for a
+   * few seconds after the container reports running.
+   */
+  async function waitForXpra(signal: AbortSignal): Promise<void> {
+    await waitForHttpReady(`http://127.0.0.1:${String(settings.port)}/`, {
+      maxMs: 60_000,
+      signal
+    })
+  }
 
   // Guards against overlapping lifecycles: Signal K does not await start(), so
   // a quick disable/enable can leave an older async chain still running.
@@ -99,7 +103,28 @@ export default function (app: OpenCpnApp): Plugin {
         : 'No GPU found at /dev/dri — running with CPU rendering'
     )
 
-    const { tag } = await container.start(settings.imageTag, { signal })
+    // retryForever, not a single attempt: on a boat nobody is around to
+    // re-enable a plugin that lost a boot-order race. Each attempt re-runs the
+    // whole bring-up because ensureRunning is idempotent.
+    const tag = await retryForever(
+      async () => {
+        const started = await container.start(settings.imageTag, { signal })
+        await waitForXpra(signal)
+        return started.tag
+      },
+      {
+        minDelayMs: 15_000,
+        maxDelayMs: 120_000,
+        signal,
+        onAttemptFailed: (err, nextDelayMs) => {
+          app.setPluginError(
+            `OpenCPN failed to start: ${errMsg(err)} — retrying in ${String(
+              Math.round(nextDelayMs / 1000)
+            )}s`
+          )
+        }
+      }
+    )
     if (gen !== generation) return
 
     if (settings.resolvedImageTag !== tag) {

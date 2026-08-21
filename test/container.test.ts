@@ -16,7 +16,19 @@ describe('buildContainerConfig', () => {
     expect(c.networkMode).toBe('host')
     // ports are ignored under host networking; setting them would be misleading
     expect(c.ports).toBeUndefined()
+  })
+
+  // Regression: signalkAccessiblePorts exists so signalk-container can wire
+  // networking and so ManagedContainer.resolveAddress() can find a published
+  // binding. Host networking creates no bindings, so resolveAddress always
+  // returns null and the helper's readiness probe dies with "Could not resolve
+  // address ... Declare the port in signalkAccessiblePorts". Declaring it would
+  // not help — the plugin probes 127.0.0.1:<port> itself instead, so the field
+  // must stay absent rather than be added in response to that error message.
+  it('does not declare signalkAccessiblePorts under host networking', () => {
+    const c = buildContainerConfig(cfg(), NO_GPU, 'x86', HOST_DATA)
     expect(c.signalkAccessiblePorts).toBeUndefined()
+    expect(c.networkMode).toBe('host')
   })
 
   it('passes the configured port to Xpra', () => {
