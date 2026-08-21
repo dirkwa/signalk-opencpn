@@ -37,6 +37,9 @@
     },
     "requires": [
       "signalk-container"
+    ],
+    "recommends": [
+      "signalk-charts-provider-simple"
     ]
   },
   "files": [

@@ -33,6 +33,25 @@ export const ConfigSchema = Type.Object({
       description: 'The tag actually running. Written by the plugin.'
     })
   ),
+  provisionSignalKToken: Type.Boolean({
+    default: true,
+    title: 'Give OpenCPN access to Signal K',
+    description:
+      'Registers OpenCPN as a Signal K device so it can stay connected. Without a token the server closes the connection about once a minute. Revoke it under Security → Devices; it will not be re-created.'
+  }),
+  signalKToken: Type.Optional(
+    Type.String({
+      readOnly: true,
+      title: 'Signal K token',
+      description: 'Issued automatically. Written to OpenCPN on start.'
+    })
+  ),
+  shareCharts: Type.Boolean({
+    default: true,
+    title: 'Share charts with Charts Provider Simple',
+    description:
+      'Mounts that plugin\u2019s chart directory into OpenCPN, which reads its MBTiles natively. Ignored when the plugin is not installed.'
+  }),
   memoryLimit: Type.String({
     default: '2g',
     title: 'Memory limit',
@@ -51,5 +70,7 @@ export type Config = Static<typeof ConfigSchema>
 export const SCHEMA_DEFAULTS: Config = {
   port: DEFAULT_PORT,
   imageTag: TAG_AUTO,
+  provisionSignalKToken: true,
+  shareCharts: true,
   memoryLimit: '2g'
 }

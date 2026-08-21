@@ -1,6 +1,7 @@
 import type { ContainerConfig } from 'signalk-container-helper'
 import type { Config } from './config/schema.js'
 import type { GpuResult } from './gpu.js'
+import { CHARTS_MOUNT } from './charts.js'
 
 export const IMAGE = 'npgause/opencpn-kiosk'
 export const CONTAINER_NAME = 'opencpn'
@@ -42,7 +43,8 @@ export function buildContainerConfig(
   settings: Config,
   gpu: GpuResult,
   tag: string,
-  hostDataPath: string
+  hostDataPath: string,
+  hostChartsPath?: string
 ): ContainerConfig {
   // An empty path would silently mount nothing at OPENCPN_DATA_PATH, so
   // OpenCPN would run with no persistent config and lose routes and waypoints
@@ -52,6 +54,25 @@ export function buildContainerConfig(
   // home-path validator — see OPENCPN_DATA_PATH above.)
   if (!hostDataPath) {
     throw new Error('OpenCPN data path is not resolved yet — the plugin is still starting')
+  }
+
+  const volumes: NonNullable<ContainerConfig['volumes']> = {
+    [OPENCPN_DATA_PATH]: hostDataPath
+  }
+
+  if (hostChartsPath) {
+    // Charts published by signalk-charts-provider-simple, shared rather than
+    // duplicated: it stores MBTiles and OpenCPN reads MBTiles natively.
+    //
+    // ⚠️ READ-WRITE. signalk-container's ContainerConfig cannot express a
+    // read-only bind today — volumeArg() supports the flag and its own job
+    // runner uses it, but VolumeSpec has no field to request one — so OpenCPN
+    // can write into a directory the charts provider owns. Switch this to
+    // read-only once VolumeSpec grows a `readOnly` option.
+    //
+    // 'skip' rather than 'create': if the directory has gone (unplugged USB,
+    // unmounted NFS) OpenCPN should still start, just without those charts.
+    volumes[CHARTS_MOUNT] = { source: hostChartsPath, ifMissing: 'skip' }
   }
 
   const config: ContainerConfig = {
@@ -67,7 +88,7 @@ export function buildContainerConfig(
       OPENCPN_USE_GPU: String(gpu.available),
       XPRA_USE_GPU: String(gpu.available)
     },
-    volumes: { [OPENCPN_DATA_PATH]: hostDataPath },
+    volumes,
     user: IMAGE_USER,
     restart: 'unless-stopped'
   }
