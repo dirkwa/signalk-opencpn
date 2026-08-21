@@ -46,6 +46,14 @@ export const ConfigSchema = Type.Object({
         'Issued automatically and written to OpenCPN on start. Clear this field to issue a new one — needed after revoking OpenCPN under Security → Devices, which is otherwise never undone automatically.'
     })
   ),
+  signalKRequestId: Type.Optional(
+    Type.String({
+      readOnly: true,
+      title: 'Pending access request',
+      description:
+        'Set while OpenCPN is waiting for approval under Security → Access Requests. Cleared once the token is issued.'
+    })
+  ),
   shareCharts: Type.Boolean({
     default: true,
     title: 'Share charts with Charts Provider Simple',

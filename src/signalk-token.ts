@@ -42,8 +42,19 @@ export interface SecurityStrategyLike {
 /** Shape of the completion payload delivered to `requestAccess`'s updateCb. */
 interface AccessRequestUpdate {
   statusCode?: number
+  requestId?: string
   data?: { permission?: string; token?: string }
 }
+
+/** Shape of `app.queryRequest(requestId)`'s reply. */
+interface RequestReply {
+  state?: string
+  statusCode?: number
+  accessRequest?: { permission?: string; token?: string }
+}
+
+/** Poll a previously filed access request for its outcome. */
+export type QueryRequest = (requestId: string) => Promise<unknown>
 
 export type ProvisionOutcome =
   /** Security is off; OpenCPN needs no token. */
@@ -52,8 +63,12 @@ export type ProvisionOutcome =
   | { kind: 'existing'; token: string }
   /** The device was approved and a token issued. */
   | { kind: 'provisioned'; token: string }
-  /** An access request is filed and waiting for a human to approve it. */
-  | { kind: 'pending' }
+  /**
+   * An access request is filed and waiting for a human to approve it. The id
+   * must be persisted: the token is delivered to that request when it is
+   * approved, and polling it is the only way to collect it afterwards.
+   */
+  | { kind: 'pending'; requestId?: string }
   /**
    * We hold a token but the device is gone: an operator revoked it. Treated as
    * a deliberate act — asking again here would nag forever.
@@ -87,7 +102,9 @@ export function deviceRegistered(strategy: SecurityStrategyLike | undefined): bo
  */
 export async function ensureDeviceToken(
   strategy: SecurityStrategyLike | undefined,
-  storedToken: string | undefined
+  storedToken: string | undefined,
+  pendingRequestId?: string,
+  queryRequest?: QueryRequest
 ): Promise<ProvisionOutcome> {
   if (!securityEnabled(strategy)) return { kind: 'not-needed' }
   if (!strategy) return { kind: 'failed', reason: 'no security strategy' }
@@ -98,8 +115,14 @@ export async function ensureDeviceToken(
       : { kind: 'revoked' }
   }
 
-  // The device may have been approved on a previous run, in which case a token
-  // is waiting in the completed request rather than in our settings.
+  // A request filed on an earlier start may have been approved since. The
+  // token was delivered to that request, not to us, so it has to be collected
+  // by polling — this is the flow a normal device client uses.
+  if (pendingRequestId && queryRequest) {
+    const collected = await collectApproved(pendingRequestId, queryRequest)
+    if (collected) return collected
+  }
+
   const requestAccess = strategy.requestAccess
   if (!requestAccess) {
     return { kind: 'failed', reason: 'security strategy has no access-request API' }
@@ -130,15 +153,16 @@ export async function ensureDeviceToken(
       onUpdate
     )) as AccessRequestUpdate | undefined
 
+    const requestId = reply?.requestId
     if (issued) return { kind: 'provisioned', token: issued }
 
     const status = reply?.statusCode
     // 202 = created and PENDING: normal, a human approves it next.
     if (status === undefined || status === 202 || status === 200) {
-      return { kind: 'pending' }
+      return { kind: 'pending', requestId }
     }
     // 400 usually means a request for this clientId is already pending.
-    if (status === 400) return { kind: 'pending' }
+    if (status === 400) return { kind: 'pending', requestId }
     return {
       kind: 'failed',
       reason: `Signal K refused the access request (status ${String(status)})`
@@ -150,4 +174,32 @@ export async function ensureDeviceToken(
 
 function config(strategy: SecurityStrategyLike): unknown {
   return strategy.getConfiguration?.()
+}
+
+/**
+ * Check a filed request for an approval that happened while we were not
+ * listening, which is the normal case: an operator approves minutes or days
+ * after the plugin asked.
+ */
+async function collectApproved(
+  requestId: string,
+  queryRequest: QueryRequest
+): Promise<ProvisionOutcome | null> {
+  let reply: RequestReply
+  try {
+    reply = (await queryRequest(requestId)) as RequestReply
+  } catch {
+    // Requests live in memory, so a server restart loses them. Nothing to
+    // collect; the caller files a fresh one.
+    return null
+  }
+
+  const token = reply.accessRequest?.token
+  if (token) return { kind: 'provisioned', token }
+  if (reply.accessRequest?.permission === 'DENIED') {
+    return { kind: 'failed', reason: 'access request was denied' }
+  }
+  // Still pending: keep waiting on the same request rather than filing another.
+  if (reply.state === 'PENDING') return { kind: 'pending', requestId }
+  return null
 }

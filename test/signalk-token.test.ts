@@ -96,6 +96,41 @@ describe('ensureDeviceToken', () => {
     expect(requestAccess).not.toHaveBeenCalled()
   })
 
+  // Signal K delivers the token exactly once and never persists it: the device
+  // record has no token field and requests live in an in-memory map. Polling
+  // the filed request while the server still runs is the only way to collect it.
+  it('collects the token from a request approved after it was filed', async () => {
+    const queryRequest = vi.fn((): Promise<unknown> =>
+      Promise.resolve({
+        state: 'COMPLETED',
+        accessRequest: { permission: 'APPROVED', token: TOKEN }
+      })
+    )
+    const r = await ensureDeviceToken(strategy(), undefined, 'req-1', queryRequest)
+    expect(r).toEqual({ kind: 'provisioned', token: TOKEN })
+  })
+
+  it('keeps waiting on the same request while it is still pending', async () => {
+    const queryRequest = vi.fn((): Promise<unknown> => Promise.resolve({ state: 'PENDING' }))
+    const r = await ensureDeviceToken(strategy(), undefined, 'req-1', queryRequest)
+    expect(r).toEqual({ kind: 'pending', requestId: 'req-1' })
+  })
+
+  it('reports a denied request rather than retrying forever', async () => {
+    const queryRequest = vi.fn((): Promise<unknown> =>
+      Promise.resolve({ state: 'COMPLETED', accessRequest: { permission: 'DENIED' } })
+    )
+    const r = await ensureDeviceToken(strategy(), undefined, 'req-1', queryRequest)
+    expect(r).toMatchObject({ kind: 'failed' })
+  })
+
+  // Requests are in-memory, so a restart loses them and queryRequest throws.
+  it('files a fresh request when the stored one no longer exists', async () => {
+    const queryRequest = vi.fn((): Promise<unknown> => Promise.reject(new Error('not found')))
+    const r = await ensureDeviceToken(strategy(), undefined, 'gone', queryRequest)
+    expect(r.kind).toBe('pending')
+  })
+
   it('reports failure when the strategy has no access-request API', async () => {
     const r = await ensureDeviceToken({ isDummy: () => false }, undefined)
     expect(r.kind).toBe('failed')

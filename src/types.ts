@@ -24,6 +24,8 @@ export interface OpenCpnApp {
    * to plugins has no getPluginOptions.
    */
   config?: { configPath?: string }
+  /** Polls a previously filed request; how an approved token is collected. */
+  queryRequest?: (requestId: string) => Promise<unknown>
 }
 
 export interface Plugin {
