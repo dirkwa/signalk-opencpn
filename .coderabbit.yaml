@@ -38,7 +38,7 @@ reviews:
       instructions: |
         ## Scope
 
-        Focus on files changed since `main`. Think about how changes interact
+        Focus on files changed since `master`. Think about how changes interact
         with the rest of the codebase, not just the diff in isolation.
 
         signalk-opencpn is a **shim**: a SignalK plugin that runs the
