@@ -47,6 +47,30 @@ function makeApp() {
   return app
 }
 
+describe('auto-enable', () => {
+  // signalk-plugin-enabled-by-default is true, so the very first start() a
+  // fresh install ever sees is handed `{}` — Signal K does not seed schema
+  // defaults. If the merge regressed, port would be undefined and the status
+  // URL would read "http://host:undefined/".
+  it('falls back to schema defaults when started with an empty config', async () => {
+    const plugin = pluginFactory({
+      debug: vi.fn(),
+      setPluginStatus: vi.fn(),
+      setPluginError: vi.fn(),
+      getDataDirPath: () => '/tmp/data',
+      savePluginOptions: vi.fn()
+    })
+    plugin.start({})
+    const app = express()
+    const router = express.Router()
+    plugin.registerWithRouter(router)
+    app.use(router)
+
+    const res = await request(app).get('/api/status').set('Host', 'boat.local:3000')
+    expect((res.body as StatusBody).url).toBe('http://boat.local:14500/')
+  })
+})
+
 describe('GET /api/status', () => {
   it('reports container state and a launch URL derived from the request host', async () => {
     const res = await request(makeApp()).get('/api/status').set('Host', 'boat.local:3000')

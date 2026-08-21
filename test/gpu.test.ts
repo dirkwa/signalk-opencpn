@@ -4,6 +4,13 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { detectGpu } from '../src/gpu.js'
 
+// These exercise Linux device-node semantics: the fixture symlinks real
+// character devices and reads /etc/group. Neither exists on Windows or macOS
+// (where the CI runner resolves /dev/null to D:\dev\null and stat fails), and
+// the code under test only ever runs on a Linux host with /dev/dri — so the
+// suite is skipped rather than faked elsewhere.
+const linuxOnly = process.platform === 'linux' ? describe : describe.skip
+
 // Real character devices need root to mknod, so the fixture points detectGpu
 // at nodes that already exist: /dev/null and /dev/zero are character devices
 // on every Linux box. Only their gid matters to the code under test, and we
@@ -36,7 +43,7 @@ async function groupFile(contents: string): Promise<string> {
   return p
 }
 
-describe('detectGpu', () => {
+linuxOnly('detectGpu', () => {
   it('reports unavailable when /dev/dri does not exist', async () => {
     expect(await detectGpu(path.join(tmp, 'nope'), '/etc/group')).toEqual({
       available: false,

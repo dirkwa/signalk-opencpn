@@ -4,7 +4,7 @@
   "description": "Run OpenCPN in a container and use it from any browser on the boat",
   "main": "plugin/index.js",
   "type": "module",
-  "signalk-plugin-enabled-by-default": false,
+  "signalk-plugin-enabled-by-default": true,
   "scripts": {
     "build": "tsc && npm run typecheck:panel && node build.js && vite build",
     "typecheck:panel": "tsc -p src/configpanel --noEmit",
