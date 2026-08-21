@@ -94,6 +94,10 @@ export default function (app: OpenCpnApp): Plugin {
    */
   async function provisionToken(gen: number): Promise<void> {
     if (!settings.provisionSignalKToken) return
+    // Checked before starting as well as after: ensureDeviceToken takes no
+    // AbortSignal, so once it is in flight it runs to completion. Not starting
+    // is the only way a retired lifecycle avoids registering a device at all.
+    if (gen !== generation) return
 
     const strategy = app.securityStrategy
     const outcome = await ensureDeviceToken(strategy, settings.signalKToken)
@@ -131,10 +135,16 @@ export default function (app: OpenCpnApp): Plugin {
     let conf: string
     try {
       conf = await fs.readFile(confPath, 'utf8')
-    } catch {
-      // First run: OpenCPN has not created its config yet. It discovers Signal
-      // K over mDNS and writes the connection itself; the token lands on the
-      // next start, once there is a connection to attach it to.
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        // First run: OpenCPN has not created its config yet. It discovers
+        // Signal K over mDNS and writes the connection itself; the token lands
+        // on the next start, once there is a connection to attach it to.
+        return
+      }
+      // Anything else (permissions, I/O) would otherwise look identical to a
+      // first run, leaving OpenCPN unauthenticated with nothing to explain it.
+      app.error?.(`Could not read OpenCPN settings: ${errMsg(err)}`)
       return
     }
     const updated = setAuthTokenInConf(conf, token)
@@ -179,10 +189,6 @@ export default function (app: OpenCpnApp): Plugin {
     // the container, which we already know: OPENCPN_DATA_PATH.)
     dataPath = mount.source
 
-    // Cleared unconditionally: it is module-scoped, so a value left by a
-    // previous lifecycle would otherwise leak into this one after the setting
-    // is turned off or the provider is uninstalled.
-    chartsPath = undefined
     if (settings.shareCharts) {
       const providerPath = findChartsPath(app)
       if (providerPath) {
@@ -263,6 +269,10 @@ export default function (app: OpenCpnApp): Plugin {
       startAbort = abort
 
       settings = { ...SCHEMA_DEFAULTS, ...(options as Partial<Config>) }
+      // Reset before any async work: a value from the previous lifecycle would
+      // otherwise still be live while this start resolves, and buildConfig can
+      // be called in between (the update routes reach it).
+      chartsPath = undefined
       app.setPluginStatus('Starting OpenCPN…')
       startSafely(app, () => asyncStart(gen, abort.signal))
     },
