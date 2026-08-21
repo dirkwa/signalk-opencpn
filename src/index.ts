@@ -13,7 +13,7 @@ import { ConfigSchema, SCHEMA_DEFAULTS, type Config } from './config/schema.js'
 import { CONTAINER_NAME, IMAGE, OPENCPN_DATA_PATH, buildContainerConfig } from './container.js'
 import { CHARTS_MOUNT, findChartsPath } from './charts.js'
 import { detectGpu, type GpuResult } from './gpu.js'
-import { setAuthTokenInConf } from './opencpn-conf.js'
+import { addChartDirectory, setAuthTokenInConf } from './opencpn-conf.js'
 import { ensureDeviceToken } from './signalk-token.js'
 import { resolveGuiUrl } from './gui-url.js'
 import type { OpenCpnApp, Plugin } from './types.js'
@@ -206,6 +206,38 @@ export default function (app: OpenCpnApp): Plugin {
   }
 
   /**
+   * Tell OpenCPN where the shared charts are, so they show up without the
+   * operator adding the path by hand in Options → Charts.
+   *
+   * Additive and idempotent: an entry OpenCPN already has is left untouched,
+   * magic number included, so its scan fingerprint survives.
+   */
+  async function seedChartDirectory(gen: number): Promise<void> {
+    const confPath = path.join(app.getDataDirPath(), 'opencpn.conf')
+    let conf: string
+    try {
+      conf = await fs.readFile(confPath, 'utf8')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        app.error?.(`Could not read OpenCPN settings: ${errMsg(err)}`)
+      }
+      // First run: OpenCPN writes the file itself, and the directory is added
+      // on the next start.
+      return
+    }
+
+    const updated = addChartDirectory(conf, CHARTS_MOUNT)
+    if (updated === null) return
+    if (gen !== generation) return
+    try {
+      await fs.writeFile(confPath, updated, 'utf8')
+      app.debug(`Added ${CHARTS_MOUNT} to OpenCPN's chart directories`)
+    } catch (err) {
+      app.error?.(`Could not add the chart directory to OpenCPN: ${errMsg(err)}`)
+    }
+  }
+
+  /**
    * Addresses that mean "this Signal K server" in an OpenCPN connection, so the
    * token is never written into a connection pointing at someone else's server.
    */
@@ -320,6 +352,8 @@ export default function (app: OpenCpnApp): Plugin {
         ? `GPU detected at /dev/dri (groups: ${gpu.groups.join(', ')})`
         : 'No GPU found at /dev/dri — running with CPU rendering'
     )
+
+    if (chartsPath) await seedChartDirectory(gen)
 
     // retryForever, not a single attempt: on a boat nobody is around to
     // re-enable a plugin that lost a boot-order race. Each attempt re-runs the

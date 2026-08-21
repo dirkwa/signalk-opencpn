@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addChartDirectory,
   AUTH_TOKEN_INDEX,
   DATA_CONNECTION_FIELDS,
   setAuthTokenInConf,
@@ -111,5 +112,51 @@ describe('setAuthTokenInConf', () => {
 
   it('returns null when there is nothing to change', () => {
     expect(setAuthTokenInConf('[Settings/Audio]\nX=1', TOKEN)).toBeNull()
+  })
+})
+
+describe('addChartDirectory', () => {
+  const withSection = [
+    '[Directories]',
+    'X=1',
+    '[ChartDirectories]',
+    'ChartDir1=/data^abc123',
+    '[Canvas]',
+    'Y=2'
+  ].join('\n')
+
+  it('appends a new entry, numbered after the existing ones', () => {
+    const out = addChartDirectory(withSection, '/charts')?.split('\n') ?? []
+    expect(out).toContain('ChartDir2=/charts^')
+  })
+
+  it('keeps the entry inside the ChartDirectories section', () => {
+    const out = addChartDirectory(withSection, '/charts')?.split('\n') ?? []
+    expect(out.indexOf('ChartDir2=/charts^')).toBeGreaterThan(out.indexOf('[ChartDirectories]'))
+    expect(out.indexOf('ChartDir2=/charts^')).toBeLessThan(out.indexOf('[Canvas]'))
+  })
+
+  // The magic number is OpenCPN's scan fingerprint. Rewriting an existing entry
+  // would discard it and force a full re-scan of a potentially huge chart set.
+  it('leaves an existing entry alone, magic number included', () => {
+    const already = withSection.replace('ChartDir1=/data^abc123', 'ChartDir1=/charts^deadbeef')
+    expect(addChartDirectory(already, '/charts')).toBeNull()
+  })
+
+  it('does not disturb entries for other directories', () => {
+    const out = addChartDirectory(withSection, '/charts') ?? ''
+    expect(out).toContain('ChartDir1=/data^abc123')
+  })
+
+  it('creates the section when the file has none yet', () => {
+    const out = addChartDirectory('[Settings]\nA=1\n', '/charts') ?? ''
+    expect(out).toContain('[ChartDirectories]')
+    expect(out).toContain('ChartDir1=/charts^')
+  })
+
+  it('writes an empty magic number, which makes OpenCPN scan the directory', () => {
+    const out = addChartDirectory(withSection, '/charts') ?? ''
+    // <path>^<magic>; empty magic is valid — navutil.cpp reads it with AfterFirst('^').
+    expect(out).toMatch(/ChartDir2=\/charts\^$/m)
   })
 })

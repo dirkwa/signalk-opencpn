@@ -20,6 +20,19 @@
  * a wrong positional write would corrupt a working connection silently.
  */
 
+/**
+ * The `[ChartDirectories]` section, whose entries are `ChartDir1`, `ChartDir2`…
+ *
+ * Each value is `<fullpath>^<magic>` (gui/src/navutil.cpp: `UpdateChartDirs`
+ * appends "^" then the magic number; `LoadChartDirArray` reads the path with
+ * `BeforeFirst('^')` and the magic with `AfterFirst('^')`). The magic is a
+ * scan fingerprint, and an empty one is valid — it simply makes OpenCPN
+ * rescan the directory, which is what we want for a directory it has never
+ * seen.
+ */
+const CHART_DIRS_SECTION = '[ChartDirectories]'
+const CHART_DIR_PREFIX = 'ChartDir'
+
 /** Number of fields OpenCPN writes; anything else is a layout we don't know. */
 export const DATA_CONNECTION_FIELDS = 24
 /** Index of AuthToken. */
@@ -106,4 +119,47 @@ export function setAuthTokenInConf(
   })
 
   return next.some((line, i) => line !== lines[i]) ? next.join('\n') : null
+}
+
+/**
+ * Add a chart directory to `[ChartDirectories]`, so charts appear without the
+ * operator having to add the path by hand in Options → Charts.
+ *
+ * Only ever ADDS: an existing entry for the same path is left exactly as it
+ * is, magic number included, because rewriting it would discard OpenCPN's scan
+ * fingerprint and force a full re-scan of what may be a very large chart set.
+ * Entries for other directories are never touched.
+ *
+ * @returns the new file contents, or null when the directory is already listed
+ * (or the file has no section to add it to).
+ */
+export function addChartDirectory(conf: string, dir: string): string | null {
+  const lines = conf.split('\n')
+  const sectionAt = lines.findIndex((line) => line.trim() === CHART_DIRS_SECTION)
+
+  const isChartDirLine = (line: string): boolean =>
+    line.startsWith(CHART_DIR_PREFIX) && line.includes('=')
+
+  // Already listed? Compare the path only — the magic number is OpenCPN's.
+  const listed = (line: string): string => line.slice(line.indexOf('=') + 1).split('^')[0] ?? ''
+
+  if (sectionAt === -1) {
+    // No section yet: OpenCPN writes one on first run, so appending our own is
+    // safe and it will be merged with anything found later.
+    return `${conf.replace(/\n*$/, '')}\n${CHART_DIRS_SECTION}\n${CHART_DIR_PREFIX}1=${dir}^\n`
+  }
+
+  // Walk the section to its end, collecting existing entries.
+  let end = sectionAt + 1
+  let count = 0
+  for (; end < lines.length; end++) {
+    const line = lines[end] ?? ''
+    if (line.startsWith('[')) break
+    if (!isChartDirLine(line)) continue
+    if (listed(line) === dir) return null
+    count++
+  }
+
+  const entry = `${CHART_DIR_PREFIX}${String(count + 1)}=${dir}^`
+  return [...lines.slice(0, end), entry, ...lines.slice(end)].join('\n')
 }
