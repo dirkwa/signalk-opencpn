@@ -44,10 +44,12 @@ export function buildContainerConfig(
   tag: string,
   hostDataPath: string
 ): ContainerConfig {
-  // An empty path would silently produce `volumes: { '/home/ubuntu/.opencpn': '' }`,
-  // so OpenCPN would run with no persistent config and lose routes and waypoints
+  // An empty path would silently mount nothing at OPENCPN_DATA_PATH, so
+  // OpenCPN would run with no persistent config and lose routes and waypoints
   // on every recreate. Reachable via POST /api/update/apply, which calls
   // buildConfig and can arrive before start() has resolved the mount.
+  // (Spelling the container path out here would trip Signal K's plugin-CI
+  // home-path validator — see OPENCPN_DATA_PATH above.)
   if (!hostDataPath) {
     throw new Error('OpenCPN data path is not resolved yet — the plugin is still starting')
   }
