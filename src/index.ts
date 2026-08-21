@@ -137,8 +137,8 @@ export default function (app: OpenCpnApp): Plugin {
         delete settings.signalKRequestId
         saveSettings()
         app.error?.(
-          'The Signal K access request for OpenCPN was denied. Clear the stored ' +
-            'request in the plugin settings to ask again.'
+          'The Signal K access request for OpenCPN was denied. Restart the plugin ' +
+            'to ask again; OpenCPN runs without Signal K access in the meantime.'
         )
         return
       case 'revoked':
@@ -196,7 +196,10 @@ export default function (app: OpenCpnApp): Plugin {
       if (Date.now() < deadline) {
         approvalTimer = setTimeout(() => void tick(), APPROVAL_POLL_MS)
         approvalTimer.unref()
+        return
       }
+      // Say so rather than leaving "Waiting for approval" on screen forever.
+      app.setPluginStatus('No approval yet — restart the plugin to request Signal K access again')
     }
     approvalTimer = setTimeout(() => void tick(), APPROVAL_POLL_MS)
     approvalTimer.unref()
