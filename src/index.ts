@@ -18,6 +18,7 @@ import { ensureDeviceToken } from './signalk-token.js'
 import { resolveGuiUrl } from './gui-url.js'
 import type { OpenCpnApp, Plugin } from './types.js'
 import { promises as fs } from 'node:fs'
+import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 
 const PLUGIN_ID = 'signalk-opencpn'
@@ -129,6 +130,18 @@ export default function (app: OpenCpnApp): Plugin {
     await writeTokenToOpenCpn(outcome.token, gen)
   }
 
+  /**
+   * Addresses that mean "this Signal K server" in an OpenCPN connection, so the
+   * token is never written into a connection pointing at someone else's server.
+   */
+  function localAddresses(): string[] {
+    const addresses = ['127.0.0.1', 'localhost', '::1']
+    for (const entries of Object.values(networkInterfaces())) {
+      for (const entry of entries ?? []) addresses.push(entry.address)
+    }
+    return addresses
+  }
+
   /** Put the token in opencpn.conf, if OpenCPN has written one yet. */
   async function writeTokenToOpenCpn(token: string, gen: number): Promise<void> {
     const confPath = path.join(app.getDataDirPath(), 'opencpn.conf')
@@ -147,11 +160,17 @@ export default function (app: OpenCpnApp): Plugin {
       app.error?.(`Could not read OpenCPN settings: ${errMsg(err)}`)
       return
     }
-    const updated = setAuthTokenInConf(conf, token)
+    const updated = setAuthTokenInConf(conf, token, localAddresses())
     if (updated === null) return
     if (gen !== generation) return
-    await fs.writeFile(confPath, updated, 'utf8')
-    app.debug('Wrote the Signal K token into OpenCPN\u2019s connection settings')
+    try {
+      await fs.writeFile(confPath, updated, 'utf8')
+      app.debug('Wrote the Signal K token into OpenCPN\u2019s connection settings')
+    } catch (err) {
+      // Report and carry on: OpenCPN still runs, it just reconnects every
+      // minute. Failing the whole start over this would be worse.
+      app.error?.(`Could not write the Signal K token to OpenCPN: ${errMsg(err)}`)
+    }
   }
 
   // Guards against overlapping lifecycles: Signal K does not await start(), so

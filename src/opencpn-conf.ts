@@ -27,6 +27,8 @@ export const AUTH_TOKEN_INDEX = 23
 /** Index of Protocol; `2` is Signal K. */
 const PROTOCOL_INDEX = 4
 const PROTOCOL_SIGNALK = '2'
+/** Index of NetworkAddress, used to tell our own server from a remote one. */
+const ADDRESS_INDEX = 2
 
 /**
  * Put `token` in the AuthToken field of every Signal K connection in a
@@ -36,11 +38,35 @@ const PROTOCOL_SIGNALK = '2'
  * so a caller can tell "already correct" and "unrecognised layout" from a
  * successful edit and avoid rewriting the file for no reason.
  */
-export function setAuthTokenInDataConnections(value: string, token: string): string | null {
+export function setAuthTokenInDataConnections(
+  value: string,
+  token: string,
+  addresses: readonly string[] = []
+): string | null {
   // OpenCPN separates multiple connections with '|'.
   const rows = value.split('|')
-  const next = rows.map((row) => rewriteRow(row, token))
+  const eligible = rows.filter(isSignalKRow)
+
+  // The token belongs to THIS server. Writing it into a connection pointing
+  // somewhere else would hand our device credential to a third-party server,
+  // so a row is only touched when its address is one of ours — or, when we
+  // could not determine our own addresses, when there is exactly one Signal K
+  // connection and it is therefore unambiguous.
+  const matches = (row: string): boolean => {
+    const address = row.split(';')[ADDRESS_INDEX]?.trim() ?? ''
+    if (addresses.length > 0) return addresses.includes(address)
+    return eligible.length === 1
+  }
+
+  const next = rows.map((row) => (isSignalKRow(row) && matches(row) ? rewriteRow(row, token) : row))
   return next.some((row, i) => row !== rows[i]) ? next.join('|') : null
+}
+
+/** Is this row a Signal K connection in the layout we know? */
+function isSignalKRow(row: string): boolean {
+  if (row.trim() === '') return false
+  const fields = row.split(';')
+  return fields.length === DATA_CONNECTION_FIELDS && fields[PROTOCOL_INDEX] === PROTOCOL_SIGNALK
 }
 
 /** One connection row, with the token set — or unchanged when not ours to edit. */
@@ -63,11 +89,19 @@ function rewriteRow(row: string, token: string): string {
  * and a round-trip through a generic INI writer would reorder keys and drop
  * the comments and formatting it wrote.
  */
-export function setAuthTokenInConf(conf: string, token: string): string | null {
+export function setAuthTokenInConf(
+  conf: string,
+  token: string,
+  addresses: readonly string[] = []
+): string | null {
   const lines = conf.split('\n')
   const next = lines.map((line) => {
     if (!line.startsWith('DataConnections=')) return line
-    const updated = setAuthTokenInDataConnections(line.slice('DataConnections='.length), token)
+    const updated = setAuthTokenInDataConnections(
+      line.slice('DataConnections='.length),
+      token,
+      addresses
+    )
     return updated === null ? line : `DataConnections=${updated}`
   })
 

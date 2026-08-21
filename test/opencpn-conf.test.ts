@@ -61,6 +61,30 @@ describe('setAuthTokenInDataConnections', () => {
     expect(out[1]?.split(';')[AUTH_TOKEN_INDEX]).toBe(TOKEN)
   })
 
+  // The token identifies THIS server's device. Writing it into a connection
+  // pointing elsewhere would hand our credential to a third-party server.
+  it('does not touch a Signal K connection to another server', () => {
+    const remote = REAL_ROW.split(';')
+    remote[2] = '198.51.100.7'
+    const both = `${REAL_ROW}|${remote.join(';')}`
+    const out = setAuthTokenInDataConnections(both, TOKEN, ['192.0.2.10'])?.split('|') ?? []
+    expect(out[0]?.split(';')[AUTH_TOKEN_INDEX]).toBe(TOKEN)
+    expect(out[1]?.split(';')[AUTH_TOKEN_INDEX]).toBe('')
+  })
+
+  it('refuses to guess when several Signal K connections exist and none is known ours', () => {
+    const remote = REAL_ROW.split(';')
+    remote[2] = '198.51.100.7'
+    const both = `${REAL_ROW}|${remote.join(';')}`
+    // No addresses supplied and more than one candidate: ambiguous, so nothing.
+    expect(setAuthTokenInDataConnections(both, TOKEN)).toBeNull()
+  })
+
+  it('still writes the only Signal K connection when addresses are unknown', () => {
+    const out = setAuthTokenInDataConnections(REAL_ROW, TOKEN)
+    expect(out?.split(';')[AUTH_TOKEN_INDEX]).toBe(TOKEN)
+  })
+
   it('replaces an existing stale token', () => {
     const stale = REAL_ROW.split(';')
     stale[AUTH_TOKEN_INDEX] = 'old-token'
