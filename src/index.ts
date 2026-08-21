@@ -35,7 +35,7 @@ export default function (app: OpenCpnApp): Plugin {
     image: IMAGE,
     buildConfig: (tag) => buildContainerConfig(settings, gpu, tag, dataPath ?? ''),
     defaultTag: SCHEMA_DEFAULTS.imageTag,
-    resolveTag: (requested) => resolveTag(requested),
+    resolveTag: (requested) => resolveTag(requested)
     // No `readiness` here on purpose. ManagedContainer's readiness probe first
     // calls resolveAddress(), which discovers the host address by inspecting
     // published port bindings — and `networkMode: 'host'` never creates any, so
