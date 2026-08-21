@@ -11,9 +11,15 @@ import {
 import { resolveTag } from './arch.js'
 import { ConfigSchema, SCHEMA_DEFAULTS, type Config } from './config/schema.js'
 import { CONTAINER_NAME, IMAGE, OPENCPN_DATA_PATH, buildContainerConfig } from './container.js'
+import { CHARTS_MOUNT, findChartsPath } from './charts.js'
 import { detectGpu, type GpuResult } from './gpu.js'
+import { setAuthTokenInConf } from './opencpn-conf.js'
+import { ensureDeviceToken } from './signalk-token.js'
 import { resolveGuiUrl } from './gui-url.js'
 import type { OpenCpnApp, Plugin } from './types.js'
+import { promises as fs } from 'node:fs'
+import { networkInterfaces } from 'node:os'
+import path from 'node:path'
 
 const PLUGIN_ID = 'signalk-opencpn'
 
@@ -21,6 +27,7 @@ export default function (app: OpenCpnApp): Plugin {
   let settings: Config = { ...SCHEMA_DEFAULTS }
   let gpu: GpuResult = { available: false, groups: [] }
   let dataPath: string | null = null
+  let chartsPath: string | undefined
 
   // Signal K may call registerWithRouter() before start(), so the container
   // object has to exist from module-factory time, not from start().
@@ -33,7 +40,7 @@ export default function (app: OpenCpnApp): Plugin {
     pluginId: PLUGIN_ID,
     name: CONTAINER_NAME,
     image: IMAGE,
-    buildConfig: (tag) => buildContainerConfig(settings, gpu, tag, dataPath ?? ''),
+    buildConfig: (tag) => buildContainerConfig(settings, gpu, tag, dataPath ?? '', chartsPath),
     defaultTag: SCHEMA_DEFAULTS.imageTag,
     resolveTag: (requested) => resolveTag(requested)
     // No `readiness` here on purpose. ManagedContainer's readiness probe first
@@ -78,6 +85,94 @@ export default function (app: OpenCpnApp): Plugin {
     })
   }
 
+  /**
+   * Get OpenCPN a Signal K token and write it into its config.
+   *
+   * Runs on every start so a hand-broken or stale opencpn.conf repairs itself,
+   * but only ISSUES a token when none has ever been held: if the device has
+   * been deleted from Signal K, that is a revocation, and quietly minting a
+   * replacement would undo it.
+   */
+  async function provisionToken(gen: number): Promise<void> {
+    if (!settings.provisionSignalKToken) return
+    // Checked before starting as well as after: ensureDeviceToken takes no
+    // AbortSignal, so once it is in flight it runs to completion. Not starting
+    // is the only way a retired lifecycle avoids registering a device at all.
+    if (gen !== generation) return
+
+    const strategy = app.securityStrategy
+    const outcome = await ensureDeviceToken(strategy, settings.signalKToken)
+    // A retired lifecycle must not persist settings or touch opencpn.conf.
+    if (gen !== generation) return
+
+    switch (outcome.kind) {
+      case 'not-needed':
+        return
+      case 'revoked':
+        app.error?.(
+          'Signal K access for OpenCPN was revoked — not re-creating it. ' +
+            'Clear the stored token in the plugin settings to issue a new one.'
+        )
+        return
+      case 'failed':
+        app.error?.(`Could not get Signal K access for OpenCPN: ${outcome.reason}`)
+        return
+      case 'provisioned':
+        // Loud on purpose: a device was granted access without anyone approving it.
+        app.debug(`Registered OpenCPN as a Signal K device (permissions: readwrite)`)
+        settings.signalKToken = outcome.token
+        saveSettings()
+        break
+      case 'existing':
+        break
+    }
+
+    await writeTokenToOpenCpn(outcome.token, gen)
+  }
+
+  /**
+   * Addresses that mean "this Signal K server" in an OpenCPN connection, so the
+   * token is never written into a connection pointing at someone else's server.
+   */
+  function localAddresses(): string[] {
+    const addresses = ['127.0.0.1', 'localhost', '::1']
+    for (const entries of Object.values(networkInterfaces())) {
+      for (const entry of entries ?? []) addresses.push(entry.address)
+    }
+    return addresses
+  }
+
+  /** Put the token in opencpn.conf, if OpenCPN has written one yet. */
+  async function writeTokenToOpenCpn(token: string, gen: number): Promise<void> {
+    const confPath = path.join(app.getDataDirPath(), 'opencpn.conf')
+    let conf: string
+    try {
+      conf = await fs.readFile(confPath, 'utf8')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        // First run: OpenCPN has not created its config yet. It discovers
+        // Signal K over mDNS and writes the connection itself; the token lands
+        // on the next start, once there is a connection to attach it to.
+        return
+      }
+      // Anything else (permissions, I/O) would otherwise look identical to a
+      // first run, leaving OpenCPN unauthenticated with nothing to explain it.
+      app.error?.(`Could not read OpenCPN settings: ${errMsg(err)}`)
+      return
+    }
+    const updated = setAuthTokenInConf(conf, token, localAddresses())
+    if (updated === null) return
+    if (gen !== generation) return
+    try {
+      await fs.writeFile(confPath, updated, 'utf8')
+      app.debug('Wrote the Signal K token into OpenCPN\u2019s connection settings')
+    } catch (err) {
+      // Report and carry on: OpenCPN still runs, it just reconnects every
+      // minute. Failing the whole start over this would be worse.
+      app.error?.(`Could not write the Signal K token to OpenCPN: ${errMsg(err)}`)
+    }
+  }
+
   // Guards against overlapping lifecycles: Signal K does not await start(), so
   // a quick disable/enable can leave an older async chain still running.
   let generation = 0
@@ -112,6 +207,32 @@ export default function (app: OpenCpnApp): Plugin {
     // ContainerConfig.volumes. (mount.containerPath is where it lands inside
     // the container, which we already know: OPENCPN_DATA_PATH.)
     dataPath = mount.source
+
+    if (settings.shareCharts) {
+      const providerPath = findChartsPath(app)
+      if (providerPath) {
+        // The provider's path is as SIGNAL K sees it; when Signal K is itself
+        // containerized the host daemon cannot resolve it, so it goes through
+        // the same translation as our own data dir.
+        try {
+          const chartsMount = await resolveMount(manager, {
+            hostPath: providerPath,
+            containerPath: CHARTS_MOUNT
+          })
+          if (gen !== generation) return
+          chartsPath = chartsMount.source
+          app.debug(`Sharing charts from ${providerPath}`)
+        } catch (err) {
+          // Charts are optional — a path we cannot reach must not stop OpenCPN.
+          app.debug(`Charts directory unavailable: ${errMsg(err)}`)
+          chartsPath = undefined
+        }
+      }
+      if (gen !== generation) return
+    }
+
+    await provisionToken(gen)
+    if (gen !== generation) return
 
     gpu = await detectGpu()
     if (gen !== generation) return
@@ -167,6 +288,10 @@ export default function (app: OpenCpnApp): Plugin {
       startAbort = abort
 
       settings = { ...SCHEMA_DEFAULTS, ...(options as Partial<Config>) }
+      // Reset before any async work: a value from the previous lifecycle would
+      // otherwise still be live while this start resolves, and buildConfig can
+      // be called in between (the update routes reach it).
+      chartsPath = undefined
       app.setPluginStatus('Starting OpenCPN…')
       startSafely(app, () => asyncStart(gen, abort.signal))
     },

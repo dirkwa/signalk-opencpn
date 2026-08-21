@@ -76,6 +76,19 @@ describe('buildContainerConfig', () => {
     expect(() => buildContainerConfig(cfg(), NO_GPU, 'x86', '')).toThrow(/not resolved yet/)
   })
 
+  it('mounts the shared charts directory when one is given', () => {
+    const c = buildContainerConfig(cfg(), NO_GPU, 'x86', HOST_DATA, '/var/charts')
+    // ifMissing 'skip': an unplugged USB or unmounted NFS share must not stop
+    // OpenCPN from starting, it just means those charts are absent.
+    expect(c.volumes?.['/charts']).toEqual({ source: '/var/charts', ifMissing: 'skip' })
+  })
+
+  it('omits the charts mount when no directory is shared', () => {
+    const c = buildContainerConfig(cfg(), NO_GPU, 'x86', HOST_DATA)
+    expect(c.volumes?.['/charts']).toBeUndefined()
+    expect(Object.keys(c.volumes ?? {})).toHaveLength(1)
+  })
+
   it('maps bind-mount ownership to the image user', () => {
     const c = buildContainerConfig(cfg(), NO_GPU, 'x86', HOST_DATA)
     expect(c.user).toEqual({ inImageUid: 1000, inImageGid: 1000 })
