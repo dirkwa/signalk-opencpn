@@ -107,7 +107,18 @@ Enable `signalk-container` first, then this plugin.
 
 ## Conventions
 
-- Conventional commits (`feat:`, `fix:`, `chore:`, …), imperative, <= 72 chars.
+- **Angular-style commits and PR titles.** `<type>(<scope>): <subject>`, where
+  type is one of `feat` `fix` `docs` `style` `refactor` `perf` `test` `build`
+  `ci` `chore` `revert`. Imperative mood, no trailing period, subject <= 72
+  chars. The scope is optional and names the area, e.g. `fix(charts):`.
+  The PR title becomes the squash commit subject, so it follows the same rule
+  and has to stand alone as a changelog line.
+- **Release PRs are titled `chore(release): X.Y.Z`.** CodeRabbit's
+  `ignore_title_keywords` matches on the PR title, so a bump titled anything
+  else is reviewed as if it were a feature — which on a one-line version change
+  only surfaces findings about pre-existing code near the diff. (The tag glob
+  in `publish.yml` matches the git tag, and `.github/release.yml` groups the
+  changelog by label, so neither depends on the title.)
 - **No AI attribution** anywhere — no `Co-Authored-By`, no mention of Claude.
 - Comments explain _why_, not _what_. Every non-obvious decision in this repo
   carries a rationale block; keep that up.
