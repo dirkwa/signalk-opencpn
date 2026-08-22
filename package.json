@@ -30,6 +30,9 @@
   "signalk": {
     "displayName": "OpenCPN",
     "appIcon": "icon.svg",
+    "screenshots": [
+      "./doc/screenshots/signalk-opencpn1.png"
+    ],
     "webapp": {
       "name": "OpenCPN",
       "description": "OpenCPN chart plotter in your browser",
@@ -45,6 +48,7 @@
   "files": [
     "plugin/**/*",
     "public/**/*",
+    "doc/**/*",
     "LICENSE.md",
     "CONTRIBUTING.md",
     "README.md"
