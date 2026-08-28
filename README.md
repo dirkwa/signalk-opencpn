@@ -30,11 +30,8 @@ updates the container; OpenCPN itself is unmodified.
 - Signal K server ≥ 2.31.0, Node ≥ 22
 - The [`signalk-container`](https://www.npmjs.com/package/signalk-container)
   plugin, installed and enabled (it provides the container runtime integration).
-  **newer than 1.30.0** if you share charts from
-  [`signalk-charts-provider-simple`](https://www.npmjs.com/package/signalk-charts-provider-simple)
-  — 1.30.0 and earlier cannot see the chart directory from inside their own
-  container and drop the mount. OpenCPN still starts; it just has no charts,
-  and says so in the log.
+  Chart sharing needs **newer than 1.30.0**; on older releases OpenCPN
+  starts without charts and logs why.
 - Podman or Docker on the host
 
 ## Install
