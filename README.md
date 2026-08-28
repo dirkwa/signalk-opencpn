@@ -49,8 +49,8 @@ The source of truth is [`src/config/schema.ts`](src/config/schema.ts).
 | Share charts | on      | Mounts the chart directory from `signalk-charts-provider-simple` read-only; OpenCPN reads its MBTiles natively. Ignored when that plugin is not installed. |
 | Memory limit | `2g`    | Hard cgroup cap for OpenCPN, Xpra and chart rendering. Empty means unlimited.                                                                              |
 
-Chart sharing needs a `signalk-container` newer than 1.30.0. On older releases
-the mount is dropped, OpenCPN still starts, and the reason is logged.
+Chart sharing needs a recent `signalk-container`; on older releases the mount is
+dropped, OpenCPN still starts, and the reason is logged.
 
 ## How it works
 
