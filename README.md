@@ -29,9 +29,7 @@ updates the container; OpenCPN itself is unmodified.
 
 - Signal K server ≥ 2.31.0, Node ≥ 22
 - The [`signalk-container`](https://www.npmjs.com/package/signalk-container)
-  plugin, installed and enabled (it provides the container runtime integration).
-  Chart sharing needs **newer than 1.30.0**; on older releases OpenCPN
-  starts without charts and logs why.
+  plugin, installed and enabled (it provides the container runtime integration)
 - Podman or Docker on the host
 
 ## Install
@@ -44,11 +42,15 @@ a few minutes on a slow connection — the plugin status line reports progress.
 
 The source of truth is [`src/config/schema.ts`](src/config/schema.ts).
 
-| Setting      | Default | Meaning                                                                                              |
-| ------------ | ------- | ---------------------------------------------------------------------------------------------------- |
-| Web UI port  | `14500` | Port OpenCPN's web interface listens on. Host networking means this is the real port on the machine. |
-| Image tag    | `auto`  | `auto` selects `x86` or `pi` from your CPU. Set an explicit tag to pin one.                          |
-| Memory limit | `2g`    | Hard cgroup cap for OpenCPN, Xpra and chart rendering. Empty means unlimited.                        |
+| Setting      | Default | Meaning                                                                                                                                                    |
+| ------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web UI port  | `14500` | Port OpenCPN's web interface listens on. Host networking means this is the real port on the machine.                                                       |
+| Image tag    | `auto`  | `auto` selects `x86` or `pi` from your CPU. Set an explicit tag to pin one.                                                                                |
+| Share charts | on      | Mounts the chart directory from `signalk-charts-provider-simple` read-only; OpenCPN reads its MBTiles natively. Ignored when that plugin is not installed. |
+| Memory limit | `2g`    | Hard cgroup cap for OpenCPN, Xpra and chart rendering. Empty means unlimited.                                                                              |
+
+Chart sharing needs a `signalk-container` newer than 1.30.0. On older releases
+the mount is dropped, OpenCPN still starts, and the reason is logged.
 
 ## How it works
 

@@ -78,9 +78,9 @@ describe('buildContainerConfig', () => {
 
   // Read-only because the charts provider owns the directory and OpenCPN only
   // reads it; `ifMissing: 'skip'` because a chart directory that has gone away
-  // must not stop OpenCPN starting. Both need signalk-container 1.30.0+ —
-  // earlier releases evaluated the skip policy against their own filesystem
-  // and dropped the mount every time, which is why this was once a bare string.
+  // must not stop OpenCPN starting. The two have DIFFERENT floors — readOnly
+  // landed in signalk-container 1.30.0, skip needs newer than that — and
+  // src/container.ts carries the detail.
   it('mounts the shared charts directory read-only and skippable', () => {
     const c = buildContainerConfig(cfg(), NO_GPU, 'x86', HOST_DATA, '/var/charts')
     expect(c.volumes?.['/charts']).toEqual({
