@@ -46,7 +46,30 @@ export default function (app: OpenCpnApp): Plugin {
     image: IMAGE,
     buildConfig: (tag) => buildContainerConfig(settings, gpu, tag, dataPath ?? '', chartsPath),
     defaultTag: SCHEMA_DEFAULTS.imageTag,
-    resolveTag: (requested) => resolveTag(requested)
+    resolveTag: (requested) => resolveTag(requested),
+    ensureOptions: {
+      // The charts mount is `ifMissing: 'skip'`, which signalk-container up to
+      // and including 1.30.0 evaluates by statting the host path from inside
+      // its OWN container — where a host path cannot exist, so it drops the
+      // mount every time. Fixed in signalk-container after 1.30.0, but the
+      // manager exposes no version or capability we can test for, so the only
+      // honest signal is this event: if the charts volume is skipped, say so
+      // loudly instead of leaving the operator with a chart-less OpenCPN and
+      // nothing in the log.
+      onVolumeIssue: (event) => {
+        if (event.containerPath !== CHARTS_MOUNT) return
+        if (event.action === 'recovered') {
+          app.debug(`Charts mount recovered: ${event.source}`)
+          return
+        }
+        app.error?.(
+          `Charts were not mounted (${event.action}): ${event.reason}. ` +
+            'If the directory does exist, update signalk-container — releases ' +
+            'up to 1.30.0 cannot see a host path from inside their own ' +
+            'container and drop the mount.'
+        )
+      }
+    }
     // No `readiness` here on purpose. ManagedContainer's readiness probe first
     // calls resolveAddress(), which discovers the host address by inspecting
     // published port bindings — and `networkMode: 'host'` never creates any, so
