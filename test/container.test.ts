@@ -76,12 +76,18 @@ describe('buildContainerConfig', () => {
     expect(() => buildContainerConfig(cfg(), NO_GPU, 'x86', '')).toThrow(/not resolved yet/)
   })
 
-  // Regression: with { ifMissing: 'skip' } signalk-container stats the HOST
-  // path from inside its own container, where it can never exist, and silently
-  // dropped the mount with "host path missing". A bare string skips that check.
-  it('mounts the shared charts directory as a plain bind', () => {
+  // Read-only because the charts provider owns the directory and OpenCPN only
+  // reads it; `ifMissing: 'skip'` because a chart directory that has gone away
+  // must not stop OpenCPN starting. Both need signalk-container 1.30.0+ —
+  // earlier releases evaluated the skip policy against their own filesystem
+  // and dropped the mount every time, which is why this was once a bare string.
+  it('mounts the shared charts directory read-only and skippable', () => {
     const c = buildContainerConfig(cfg(), NO_GPU, 'x86', HOST_DATA, '/var/charts')
-    expect(c.volumes?.['/charts']).toBe('/var/charts')
+    expect(c.volumes?.['/charts']).toEqual({
+      source: '/var/charts',
+      readOnly: true,
+      ifMissing: 'skip'
+    })
   })
 
   it('omits the charts mount when no directory is shared', () => {
@@ -116,6 +122,15 @@ describe('buildContainerConfig', () => {
   it('is byte-identical across repeated calls with the same inputs', () => {
     const a = buildContainerConfig(cfg(), GPU, 'x86', HOST_DATA)
     const b = buildContainerConfig(cfg(), GPU, 'x86', HOST_DATA)
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b))
+  })
+
+  // The charts entry is an object, not a string, so key order is part of the
+  // serialized shape signalk-container diffs. An unstable order would look
+  // like drift and recreate the container on every reconcile.
+  it('is byte-identical with charts shared, too', () => {
+    const a = buildContainerConfig(cfg(), GPU, 'x86', HOST_DATA, '/var/charts')
+    const b = buildContainerConfig(cfg(), GPU, 'x86', HOST_DATA, '/var/charts')
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
   })
 

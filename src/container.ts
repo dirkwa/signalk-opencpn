@@ -64,18 +64,27 @@ export function buildContainerConfig(
     // Charts published by signalk-charts-provider-simple, shared rather than
     // duplicated: it stores MBTiles and OpenCPN reads MBTiles natively.
     //
-    // ⚠️ READ-WRITE. signalk-container's ContainerConfig cannot express a
-    // read-only bind today — volumeArg() supports the flag and its own job
-    // runner uses it, but VolumeSpec has no field to request one — so OpenCPN
-    // can write into a directory the charts provider owns. Switch this to
-    // read-only once VolumeSpec grows a `readOnly` option.
+    // Read-only: the charts provider owns this directory, and OpenCPN only
+    // ever reads from it. Needs signalk-container 1.30.0+ for
+    // VolumeSpec.readOnly; older managers ignore the unknown field.
     //
-    // Plain string, NOT { ifMissing: 'skip' }. The skip policy stats the HOST
-    // path from inside signalk-container's own container, where a host path
-    // like /home/<user>/... can never exist, so the mount was silently dropped
-    // every time with "host path missing" — even though the directory is
-    // there. A bare source skips that check and binds it directly.
-    volumes[CHARTS_MOUNT] = hostChartsPath
+    // ⚠️ `ifMissing: 'skip'` needs signalk-container NEWER than 1.30.0. Up to
+    // and including 1.30.0 the skip policy stats the host path from inside
+    // signalk-container's own container, where a host path cannot exist, so
+    // the mount is dropped with "host path missing" even though the directory
+    // is there — which is why this was a bare string until now. Fixed by
+    // signalk-container #249 (an unverifiable source is kept and reported
+    // unverified), merged but UNRELEASED at the time of writing.
+    //
+    // The manager exposes no version or capability to test for, so an older
+    // one degrades rather than being detected: OpenCPN starts without charts
+    // and the onVolumeIssue handler in index.ts logs why. Do not release this
+    // ahead of the signalk-container release that carries #249.
+    volumes[CHARTS_MOUNT] = {
+      source: hostChartsPath,
+      readOnly: true,
+      ifMissing: 'skip'
+    }
   }
 
   const config: ContainerConfig = {
