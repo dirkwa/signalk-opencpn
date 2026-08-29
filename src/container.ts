@@ -68,18 +68,17 @@ export function buildContainerConfig(
     // ever reads from it. Needs signalk-container 1.30.0+ for
     // VolumeSpec.readOnly; older managers ignore the unknown field.
     //
-    // ⚠️ `ifMissing: 'skip'` needs signalk-container NEWER than 1.30.0. Up to
-    // and including 1.30.0 the skip policy stats the host path from inside
+    // ⚠️ `ifMissing: 'skip'` needs signalk-container 1.31.0+. Up to and
+    // including 1.30.0 the skip policy stats the host path from inside
     // signalk-container's own container, where a host path cannot exist, so
     // the mount is dropped with "host path missing" even though the directory
-    // is there — which is why this was a bare string until now. Fixed by
-    // signalk-container #249 (an unverifiable source is kept and reported
-    // unverified), merged but UNRELEASED at the time of writing.
+    // is there — which is why this was a bare string until now. Fixed in
+    // signalk-container 1.31.0 (#249): an unverifiable source is kept and
+    // reported unverified instead of skipped.
     //
     // The manager exposes no version or capability to test for, so an older
     // one degrades rather than being detected: OpenCPN starts without charts
-    // and the onVolumeIssue handler in index.ts logs why. Do not release this
-    // ahead of the signalk-container release that carries #249.
+    // and the onVolumeIssue handler in index.ts logs why.
     volumes[CHARTS_MOUNT] = {
       source: hostChartsPath,
       readOnly: true,
